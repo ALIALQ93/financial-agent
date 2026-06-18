@@ -286,6 +286,10 @@ function scoreProjectMatch(project, query, indexEntry) {
     if (codeN.includes(n) || nameN.includes(n)) score += 18;
   }
 
+  for (const y of extractYearHints(query)) {
+    if (projectContainsYear(project, y)) score += 35;
+  }
+
   for (const token of tokens) {
     const aliases = expandAliases(token);
     for (const alias of aliases) {
@@ -310,10 +314,223 @@ function scoreProjectMatch(project, query, indexEntry) {
   for (const token of tokens) {
     for (const alias of expandAliases(token)) {
       if (nameN === alias || codeN === alias) score += 20;
+      // اسم مشروع ككلمة واحدة أولى عن اسم مركّب (مثل Karbala مقابل Karbala PIP)
+      if (nameN === alias && !nameN.includes(' ')) score += 25;
     }
   }
 
+  // تطابق كامل للاسم كما في السؤال
+  const queryCore = normalizeForSearch(extractQueryTokens(query).join(' '));
+  if (queryCore && (nameN === queryCore || codeN === queryCore)) score += 45;
+
   return score;
+}
+
+function extractYearHints(query) {
+  const q = cleanQuery(query);
+  const hints = new Set();
+  (q.match(/\b20\d{2}\b/g) || []).forEach(y => hints.add(y));
+  (q.match(/(?:^|[\s\-/])(\d{2})(?:\s|$|[^\d])/g) || []).forEach(m => {
+    const d = m.replace(/\D/g, '');
+    if (d.length === 2) hints.add('20' + d);
+  });
+  (q.match(/\b\d{2,4}\b/g) || []).forEach(n => {
+    if (n.length === 4 && n.startsWith('20')) hints.add(n);
+    if (n.length === 2) hints.add('20' + n);
+  });
+  return [...hints];
+}
+
+function sharedProjectStem(p1, p2) {
+  const n1 = normalizeForSearch(p1.name);
+  const n2 = normalizeForSearch(p2.name);
+  const c1 = normalizeForSearch(p1.code);
+  const c2 = normalizeForSearch(p2.code);
+
+  if (n1 && n2 && (n1.includes(n2) || n2.includes(n1))) return true;
+  if (c1 && c2 && c1.length >= 2 && c2.length >= 2 && (c1.includes(c2) || c2.includes(c1))) return true;
+
+  const GENERIC = new Set([
+    'provision', 'of', 'the', 'project', 'مشروع', 'upgrade', 'epcc', 'fsf', 'for', 'and',
+    'no', 'camp', 'power', 'station', 'single', 'source',
+  ]);
+  const tokens = (s) => s.split(/\s+/).filter(t => t.length >= 3 && !GENERIC.has(t));
+  const t1 = tokens(n1);
+  const t2 = tokens(n2);
+  const shared = t1.filter(t => t2.includes(t));
+  return shared.length >= 1;
+}
+
+function extractProjectNumbers(query) {
+  const qNorm = normalizeForSearch(cleanQuery(query));
+  const yearSet = new Set(extractYearHints(query).flatMap(y => [y, y.length === 4 ? y.slice(2) : y]));
+  return (qNorm.match(/\d{2,4}/g) || []).filter(n => {
+    if (yearSet.has(n)) return false;
+    if (n.length === 4 && n.startsWith('20')) return false;
+    return true;
+  });
+}
+
+function matchesAllKeyMarkers(query, project) {
+  const years = extractYearHints(query);
+  const nums = extractProjectNumbers(query);
+  if (!years.length && !nums.length) return true;
+  const nameN = normalizeForSearch(project.name);
+  const codeN = normalizeForSearch(project.code);
+  const yearsOk = !years.length || years.every(y => projectContainsYear(project, y));
+  const numsOk = !nums.length || nums.every(n => nameN.includes(n) || codeN.includes(n));
+  return yearsOk && numsOk;
+}
+
+function projectContainsYear(project, year) {
+  const nameN = normalizeForSearch(project.name);
+  const codeN = normalizeForSearch(project.code);
+  if (year.length === 4) {
+    if (nameN.includes(year) || codeN.includes(year)) return true;
+    const short = year.slice(2);
+    const re = new RegExp(`(?:^|[\\s\\-/])${short}(?:$|[\\s\\-/])`);
+    return re.test(nameN) || re.test(codeN);
+  }
+  return nameN.includes(year) || codeN.includes(year);
+}
+
+function hasDistinctQueryMarker(query, top, second) {
+  const qNorm = normalizeForSearch(cleanQuery(query));
+  const topName = normalizeForSearch(top.name);
+  const topCode = normalizeForSearch(top.code);
+  const secName = normalizeForSearch(second.name);
+  const secCode = normalizeForSearch(second.code);
+
+  if (sharedProjectStem(top, second)) {
+    const years = extractYearHints(query);
+    const nums = (qNorm.match(/\d{2,4}/g) || []).filter(n => n.length >= 2);
+    if (years.length && nums.length) {
+      const topHasAll = years.every(y => projectContainsYear(top, y)) &&
+        nums.some(n => topName.includes(n) || topCode.includes(n));
+      const secHasAll = years.every(y => projectContainsYear(second, y)) &&
+        nums.some(n => secName.includes(n) || secCode.includes(n));
+      if (topHasAll && !secHasAll) return true;
+    }
+  }
+
+  for (const y of extractYearHints(query)) {
+    const inTop = projectContainsYear(top, y);
+    const inSec = projectContainsYear(second, y);
+    if (inTop && !inSec) return true;
+  }
+
+  if (topCode.length >= 3 && qNorm.includes(topCode) && topCode !== secCode && !qNorm.includes(secCode)) {
+    return true;
+  }
+
+  const tokens = extractQueryTokens(query);
+  for (const token of tokens) {
+    for (const alias of expandAliases(token)) {
+      if (alias.length < 3) continue;
+      const hitsTop = topName === alias || topCode === alias;
+      const hitsSec = secName === alias || secCode === alias;
+      if (hitsTop && hitsSec) continue;
+      if (hitsTop && !hitsSec) {
+        if (secName.startsWith(alias + ' ') || secName.includes(' ' + alias)) continue;
+        return true;
+      }
+    }
+    if (topName === normalizeForSearch(token) && topName !== secName &&
+        !secName.startsWith(topName + ' ') && !sharedProjectStem(top, second)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function resolveProjectQuery(records, query) {
+  const matches = findMatchingProjects(records, query);
+  if (!matches.length) {
+    return { status: 'none', matches, query };
+  }
+
+  const strictMatches = matches.filter(m => matchesAllKeyMarkers(query, m));
+  if (strictMatches.length === 1) {
+    return { status: 'unique', project: strictMatches[0], matches, query };
+  }
+
+  const pool = strictMatches.length > 1 ? strictMatches : matches;
+  if (pool.length === 1) {
+    return { status: 'unique', project: pool[0], matches, query };
+  }
+
+  const top = pool[0];
+  const second = pool[1];
+  const scoreGap = top.score - second.score;
+
+  if (hasDistinctQueryMarker(query, top, second) && scoreGap >= 8) {
+    return { status: 'unique', project: top, matches, query };
+  }
+
+  const closeCandidates = pool.filter(m => top.score - m.score <= 45);
+  const similarGroup = closeCandidates.filter((p, i) =>
+    i === 0 || closeCandidates.slice(0, i).some(prev => sharedProjectStem(p, prev))
+  );
+
+  const stemWithSecond = sharedProjectStem(top, second);
+  const ambiguousBySimilarity = similarGroup.length > 1 ||
+    (stemWithSecond && second.score >= 90 && scoreGap < 80);
+
+  const ambiguousByScore = scoreGap < 35 && ratioSafe(top.score, second.score) > 0.72;
+
+  if (ambiguousBySimilarity && (ambiguousByScore || stemWithSecond)) {
+    const group = stemWithSecond
+      ? pool.filter(m => top.score - m.score <= 80 && sharedProjectStem(top, m)).slice(0, 5)
+      : similarGroup.slice(0, 5);
+    return {
+      status: 'ambiguous',
+      candidates: group.length > 1 ? group : similarGroup.slice(0, 5),
+      matches,
+      query,
+      reason: 'يوجد تشابه بين أسماء المشاريع — يلزم تحديد المشروع بدقة (الكود، السنة، أو الاسم الكامل)',
+    };
+  }
+
+  if (scoreGap >= 40 && !stemWithSecond) {
+    return { status: 'unique', project: top, matches, query };
+  }
+
+  if (similarGroup.length > 1 && scoreGap < 50) {
+    return {
+      status: 'ambiguous',
+      candidates: similarGroup.slice(0, 5),
+      matches,
+      query,
+      reason: 'يوجد تشابه بين أسماء المشاريع — يلزم تحديد المشروع بدقة (الكود، السنة، أو الاسم الكامل)',
+    };
+  }
+
+  return { status: 'unique', project: top, matches, query };
+}
+
+function ratioSafe(top, second) {
+  if (!top) return 0;
+  return second / top;
+}
+
+function buildDisambiguationTable(records, candidates) {
+  return {
+    title: 'مشاريع متشابهة — يرجى التحديد',
+    headers: ['#', 'المشروع', 'الكود', 'العملة', 'الإيراد USD', 'التكاليف USD', 'تطابق السؤال'],
+    rows: candidates.map((p, i) => {
+      const a = analyzeProjectRecords(filterByProject(records, p));
+      return [
+        String(i + 1),
+        p.name,
+        p.code,
+        a.currency,
+        formatUSD(a.revenue),
+        formatUSD(a.totalCosts),
+        i === 0 ? `الأقرب (درجة ${p.score})` : `متشابه (درجة ${p.score})`,
+      ];
+    }),
+  };
 }
 
 function findMatchingProjects(records, query) {
@@ -720,7 +937,6 @@ function buildDetailTable(records, title, limit = 50) {
 function buildVisuals(records, userMessage) {
   const query = cleanQuery(userMessage);
   const intent = detectIntent(query, records);
-  const projects = findMatchingProjects(records, query);
   const tables = [];
   const charts = [];
 
@@ -825,47 +1041,52 @@ function buildVisuals(records, userMessage) {
     }
   }
 
-  if (intent === 'project' && projects.length) {
-    const project = projects[0];
-    const filtered = filterByProject(records, project);
-    const a = analyzeProjectRecords(filtered);
+  if (intent === 'project') {
+    const resolution = resolveProjectQuery(records, query);
+    if (resolution.status === 'unique') {
+      const project = resolution.project;
+      const filtered = filterByProject(records, project);
+      const a = analyzeProjectRecords(filtered);
 
-    tables.push({
-      title: `ملخص مشروع: ${project.name} (${a.currency})`,
-      headers: ['البند', 'الصافي (USD)', 'القيمة بعملة المشروع', 'نوع السجل / المعنى'],
-      rows: projectSummaryRows(a),
-    });
-
-    if (a.expenseList.length) {
       tables.push({
-        title: 'تفصيل التكاليف حسب المجموعة',
-        headers: ['المجموعة', 'الصافي (USD)', `بعملة المشروع (${a.currency})`, 'النسبة %'],
-        rows: a.expenseList.map(e => [
-          e.group,
-          formatUSD(e.amount),
-          formatLocalAmount(e.amountLocal, a.currency),
-          e.pct.toFixed(1) + '%',
-        ]),
+        title: `ملخص مشروع: ${project.name} (${a.currency})`,
+        headers: ['البند', 'الصافي (USD)', 'القيمة بعملة المشروع', 'نوع السجل / المعنى'],
+        rows: projectSummaryRows(a),
       });
 
-      charts.push({
-        type: 'doughnut',
-        title: 'توزيع التكاليف',
-        labels: a.expenseList.slice(0, 8).map(e => e.group.slice(0, 20)),
-        datasets: [{ label: 'التكاليف', data: a.expenseList.slice(0, 8).map(e => e.amount) }],
-        colors: CHART_THEME.palette,
-      });
+      if (a.expenseList.length) {
+        tables.push({
+          title: 'تفصيل التكاليف حسب المجموعة',
+          headers: ['المجموعة', 'الصافي (USD)', `بعملة المشروع (${a.currency})`, 'النسبة %'],
+          rows: a.expenseList.map(e => [
+            e.group,
+            formatUSD(e.amount),
+            formatLocalAmount(e.amountLocal, a.currency),
+            e.pct.toFixed(1) + '%',
+          ]),
+        });
+
+        charts.push({
+          type: 'doughnut',
+          title: 'توزيع التكاليف',
+          labels: a.expenseList.slice(0, 8).map(e => e.group.slice(0, 20)),
+          datasets: [{ label: 'التكاليف', data: a.expenseList.slice(0, 8).map(e => e.amount) }],
+          colors: CHART_THEME.palette,
+        });
+      }
+
+      if (a.contractors.length) {
+        tables.push({
+          title: 'المقاولين والمجهزين والموردين',
+          headers: ['الجهة', 'الصافي (USD)', 'نوع السجل', 'الوضع'],
+          rows: a.contractors.map(c => [c.name, formatUSD(c.net), 'المقاوليين/المجهزيين/الموردين', c.status]),
+        });
+      }
+
+      tables.push(buildDetailTable(filtered, 'سجلات المشروع التفصيلية', 40));
+    } else if (resolution.status === 'ambiguous') {
+      tables.push(buildDisambiguationTable(records, resolution.candidates));
     }
-
-    if (a.contractors.length) {
-      tables.push({
-        title: 'المقاولين والمجهزين والموردين',
-        headers: ['الجهة', 'الصافي (USD)', 'نوع السجل', 'الوضع'],
-        rows: a.contractors.map(c => [c.name, formatUSD(c.net), 'المقاوليين/المجهزيين/الموردين', c.status]),
-      });
-    }
-
-    tables.push(buildDetailTable(filtered, 'سجلات المشروع التفصيلية', 40));
   }
 
   if (intent === 'contractor') {
@@ -914,7 +1135,6 @@ function buildContext(records, userMessage) {
   const role = extractRole(userMessage);
   const query = cleanQuery(userMessage);
   const intent = detectIntent(query, records);
-  const projects = findMatchingProjects(records, query);
 
   let out = `تاريخ البيانات: من Google Sheets\n`;
   out += `عدد السجلات: ${records.length} | عدد المشاريع: ${getAllProjects(records).length}\n`;
@@ -934,25 +1154,24 @@ function buildContext(records, userMessage) {
     case 'no_revenue':
       out += buildNoRevenueReport(records);
       break;
-    case 'project':
-      if (projects.length === 1) {
+    case 'project': {
+      const resolution = resolveProjectQuery(records, query);
+      if (resolution.status === 'unique') {
         const matchNote = describeProjectMatch(
-          { ...projects[0], terms: buildProjectSearchTerms(projects[0]) },
+          { ...resolution.project, terms: buildProjectSearchTerms(resolution.project) },
           query
         );
         if (matchNote) out += matchNote + '\n\n';
-        out += buildProjectReport(records, projects[0]);
-      } else if (projects.length > 1) {
-        out += `⚠️ وُجد أكثر من مشروع محتمل — اختر الاسم أو الكود بدقة:\n`;
-        projects.slice(0, 5).forEach(p => { out += `- ${p.name} (${p.code})\n`; });
-        const matchNote = describeProjectMatch(
-          { ...projects[0], terms: buildProjectSearchTerms(projects[0]) },
-          query
-        );
-        out += '\n' + buildProjectReport(records, projects[0]);
-        out += `\n(التقرير أعلاه للمشروع الأقرب للسؤال: ${projects[0].name})`;
-        if (matchNote) out += `\n${matchNote}`;
-        out += '\n';
+        out += buildProjectReport(records, resolution.project);
+      } else if (resolution.status === 'ambiguous') {
+        out += `⚠️ **${resolution.reason}**\n\n`;
+        out += `المشاريع المتشابهة المحتملة:\n`;
+        resolution.candidates.forEach((p, i) => {
+          const a = analyzeProjectRecords(filterByProject(records, p));
+          out += `${i + 1}. **${p.name}** (كود: \`${p.code}\`) — إيراد ${formatUSD(a.revenue)}, تكاليف ${formatUSD(a.totalCosts)}\n`;
+        });
+        out += `\n**لم يُنشأ تقرير تفصيلي** لتجنب الخلط. أعد السؤال مع الكود أو السنة أو الاسم الكامل.\n`;
+        out += `مثال: \`تقرير مشروع OHTL Upgrade 034 - 2026\` أو \`تقرير كربلاء PIP\`\n`;
       } else {
         out += buildCompanyReport(records);
         out += '\n⚠️ لم يُتعرف على المشروع من السؤال — يُعرض التقرير الإجمالي.\n';
@@ -960,6 +1179,7 @@ function buildContext(records, userMessage) {
         getAllProjects(records).forEach(p => { out += `- ${p.name} (${p.code})\n`; });
       }
       break;
+    }
     default:
       out += buildCompanyReport(records);
       out += '\n' + buildComparisonReport(records);
@@ -978,6 +1198,7 @@ module.exports = {
   cleanQuery,
   detectIntent,
   findMatchingProjects,
+  resolveProjectQuery,
   describeProjectMatch,
   normalizeForSearch,
   extractQueryTokens,
