@@ -71,9 +71,9 @@ function interpretRecord(rec) {
       return `نوع: ${typeName} — إيراد ${formatUSD(Math.abs(net))} | بعملة المشروع: ${local}`;
     case 'expense':
       if (rec.recordType === 'خدمات') {
-        return `نوع: خدمات — مصروف ${formatUSD(net)} | بعملة المشروع: ${local}`;
+        return `نوع: خدمات — مصروف مدفوع ${formatUSD(net)} | بعملة المشروع: ${local}`;
       }
-      return `نوع: ${typeName} — مصروف ${formatUSD(net)} | بعملة المشروع: ${local}`;
+      return `نوع: ${typeName} — مصروف مدفوع ${formatUSD(net)} | بعملة المشروع: ${local}`;
     case 'reservation':
       return `نوع: ${typeName} — حجز ضمان ${formatUSD(net)} (منفصل عن الإيراد) | بعملة المشروع: ${local}`;
     case 'contractor':
@@ -109,16 +109,17 @@ function normalizeRecord(raw) {
 
 function classifyRecord(rec) {
   const { accountCode, recordType } = rec;
-  if (recordType === 'حجز' || accountCode.startsWith('11')) return 'reservation';
+  if (recordType === 'حجز') return 'reservation';
   if (recordType === 'ايراد') return 'revenue';
   if (recordType === 'مزاد') return 'auction';
-  if (
-    recordType === 'المقاوليين' || recordType === 'المجهزيين' || recordType === 'الموردين' ||
-    accountCode.startsWith('20')
-  ) {
+  // نوع السجل أولاً — لا يُلغى بكود الحساب
+  if (recordType === 'خدمات' || recordType === 'المصاريف') return 'expense';
+  if (recordType === 'المقاوليين' || recordType === 'المجهزيين' || recordType === 'الموردين') {
     return 'contractor';
   }
-  if (recordType === 'خدمات' || recordType === 'المصاريف' || accountCode.startsWith('32')) return 'expense';
+  if (accountCode.startsWith('11')) return 'reservation';
+  if (accountCode.startsWith('20')) return 'contractor';
+  if (accountCode.startsWith('32')) return 'expense';
   return 'other';
 }
 
@@ -692,7 +693,7 @@ function projectSummaryRows(a) {
     ['الإيراد الكلي', formatUSD(a.revenue), formatLocalAmount(a.revenueLocal, a.currency), 'نوع: ايراد'],
     ['الحجز لدى العميل', formatUSD(a.reservation), formatLocalAmount(a.reservationLocal, a.currency), 'نوع: حجز'],
     ['المستلم فعلاً', formatUSD(a.received), formatLocalAmount(a.receivedLocal, a.currency), 'إيراد − حجز'],
-    ['إجمالي التكاليف', formatUSD(a.totalCosts), formatLocalAmount(a.totalCostsLocal, a.currency), 'مصاريف وخدمات'],
+    ['إجمالي التكاليف', formatUSD(a.totalCosts), formatLocalAmount(a.totalCostsLocal, a.currency), 'مصاريف وخدمات مدفوعة'],
     ['الربح التقديري', formatUSD(a.profit), formatLocalAmount(a.profitLocal, a.currency), 'إيراد − تكاليف'],
     ['هامش الربح', a.margin !== null ? a.margin.toFixed(1) + '%' : '—', '—', '—'],
   ];
