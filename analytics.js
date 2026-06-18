@@ -55,7 +55,7 @@ const TYPE_LABELS = {
   expense: 'المصاريف',
   services: 'خدمات',
   reservation: 'حجز',
-  contractor: 'مقاول/مورد',
+  contractor: 'مقاول/مجهز/مورد',
   auction: 'مزاد',
   other: 'أخرى',
 };
@@ -70,14 +70,15 @@ function interpretRecord(rec) {
     case 'revenue':
       return `نوع: ${typeName} — إيراد ${formatUSD(Math.abs(net))} | بعملة المشروع: ${local}`;
     case 'expense':
+      if (rec.recordType === 'خدمات') {
+        return `نوع: خدمات — مصروف ${formatUSD(net)} | بعملة المشروع: ${local}`;
+      }
       return `نوع: ${typeName} — مصروف ${formatUSD(net)} | بعملة المشروع: ${local}`;
-    case 'services':
-      return `نوع: ${typeName} — تكلفة خدمة ${formatUSD(net)} | بعملة المشروع: ${local}`;
     case 'reservation':
       return `نوع: ${typeName} — حجز ضمان ${formatUSD(net)} (منفصل عن الإيراد) | بعملة المشروع: ${local}`;
     case 'contractor':
-      if (net > 0) return `نوع: ${typeName} — مستحق للمقاول ${formatUSD(net)} | بعملة المشروع: ${local}`;
-      if (net < 0) return `نوع: ${typeName} — دفعة مقدمة من الشركة ${formatUSD(Math.abs(net))} | بعملة المشروع: ${local}`;
+      if (net > 0) return `نوع: ${typeName} — مصروف لم يُدفع بعد ${formatUSD(net)} | بعملة المشروع: ${local}`;
+      if (net < 0) return `نوع: ${typeName} — أعمال/توريد ستُقدَّم لاحقاً ${formatUSD(Math.abs(net))} | بعملة المشروع: ${local}`;
       return `نوع: ${typeName} — متوازن`;
     case 'auction':
       if (net < 0) return `نوع: ${typeName} — ربح فرق عملة ${formatUSD(Math.abs(net))}`;
@@ -111,11 +112,13 @@ function classifyRecord(rec) {
   if (recordType === 'حجز' || accountCode.startsWith('11')) return 'reservation';
   if (recordType === 'ايراد') return 'revenue';
   if (recordType === 'مزاد') return 'auction';
-  if (recordType === 'المقاوليين' || recordType === 'المجهزيين' || accountCode.startsWith('20')) {
+  if (
+    recordType === 'المقاوليين' || recordType === 'المجهزيين' || recordType === 'الموردين' ||
+    accountCode.startsWith('20')
+  ) {
     return 'contractor';
   }
-  if (recordType === 'خدمات') return 'services';
-  if (recordType === 'المصاريف' || accountCode.startsWith('32')) return 'expense';
+  if (recordType === 'خدمات' || recordType === 'المصاريف' || accountCode.startsWith('32')) return 'expense';
   return 'other';
 }
 
@@ -390,7 +393,7 @@ function analyzeProjectRecords(records) {
   let reservationLocal = 0;
   let expenses = 0;
   let expensesLocal = 0;
-  let services = 0;
+  let expenseServices = 0;
   let auctionNet = 0;
   const expenseGroups = new Map();
   const expenseGroupsLocal = new Map();
@@ -414,15 +417,9 @@ function analyzeProjectRecords(records) {
       case 'expense':
         expenses += r.net;
         expensesLocal += local;
+        if (r.recordType === 'خدمات') expenseServices += r.net;
         expenseGroups.set(r.group, (expenseGroups.get(r.group) || 0) + r.net);
         expenseGroupsLocal.set(r.group, (expenseGroupsLocal.get(r.group) || 0) + local);
-        break;
-      case 'services':
-        services += r.net;
-        expenses += r.net;
-        expensesLocal += local;
-        expenseGroups.set('خدمات', (expenseGroups.get('خدمات') || 0) + r.net);
-        expenseGroupsLocal.set('خدمات', (expenseGroupsLocal.get('خدمات') || 0) + local);
         break;
       case 'auction':
         auctionNet += r.net;
@@ -454,7 +451,8 @@ function analyzeProjectRecords(records) {
     alerts.push('حجز > 15% من الإيراد');
   }
   for (const [, c] of contractors) {
-    if (c.net < -50000) alerts.push(`دفعة مقدمة كبيرة: ${c.name}`);
+    if (c.net > 50000) alerts.push(`مصروف مستحق غير مدفوع كبير: ${c.name}`);
+    if (c.net < -50000) alerts.push(`التزام أعمال/توريد مستقبلي كبير: ${c.name}`);
   }
 
   const expenseList = [...expenseGroups.entries()]
@@ -480,7 +478,7 @@ function analyzeProjectRecords(records) {
     receivedLocal: revenueLocal - reservationLocal,
     totalCosts,
     totalCostsLocal: expensesLocal,
-    services,
+    expenseServices,
     profit,
     profitLocal: revenueLocal - expensesLocal,
     margin,
@@ -492,7 +490,7 @@ function analyzeProjectRecords(records) {
     contractors: [...contractors.values()].map(c => ({
       name: c.name,
       net: c.net,
-      status: c.net > 0 ? 'مستحق للمقاول' : c.net < 0 ? 'دفعة مقدمة من الشركة' : 'متوازن',
+      status: c.net > 0 ? 'مصروف لم يُدفع بعد' : c.net < 0 ? 'أعمال/توريد ستُقدَّم لاحقاً' : 'متوازن',
       projects: [...c.projects],
     })),
     alerts,
@@ -525,7 +523,8 @@ function buildProjectReport(records, project) {
   }
 
   if (a.contractors.length) {
-    out += `**[ وضع المقاولين — نوع السجل: المقاوليين/المجهزيين ]**\n`;
+    out += `**[ المقاولين والمجهزين والموردين — نوع السجل: المقاوليين/المجهزيين/الموردين ]**\n`;
+    out += `*(موجب = مصروف لم يُدفع بعد | سالب = أعمال/توريد ستُقدَّم لاحقاً)*\n`;
     out += `| الجهة | الصافي (USD) | الوضع |\n|-------|-------------|-------|\n`;
     for (const c of a.contractors) {
       out += `| ${c.name} | ${formatUSD(c.net)} | ${c.status} |\n`;
@@ -624,7 +623,8 @@ function buildContractorReport(records, query) {
 
   if (!matched.length) matched = names;
 
-  let out = `## وضع المقاولين والموردين — محسوب مسبقاً\n\n`;
+  let out = `## وضع المقاولين والمجهزين والموردين — محسوب مسبقاً\n`;
+  out += `*(موجب = مصروف لم يُدفع بعد | سالب = أعمال/توريد ستُقدَّم لاحقاً)*\n\n`;
 
   for (const name of matched) {
     const recs = contractorRecords.filter(r => r.accountName === name);
@@ -637,8 +637,8 @@ function buildContractorReport(records, query) {
       byProject.set(key, (byProject.get(key) || 0) + r.net);
     }
 
-    const status = totalNet > 0 ? 'مستحق للمقاول على الشركة' :
-      totalNet < 0 ? 'دفعة مقدمة من الشركة للمقاول' : 'متوازن';
+    const status = totalNet > 0 ? 'مصروف لم يُدفع بعد' :
+      totalNet < 0 ? 'أعمال/توريد ستُقدَّم لاحقاً' : 'متوازن';
 
     out += `### ${name}\n`;
     out += `- الإجمالي: ${formatUSD(totalNet)} — ${status}\n`;
@@ -692,7 +692,7 @@ function projectSummaryRows(a) {
     ['الإيراد الكلي', formatUSD(a.revenue), formatLocalAmount(a.revenueLocal, a.currency), 'نوع: ايراد'],
     ['الحجز لدى العميل', formatUSD(a.reservation), formatLocalAmount(a.reservationLocal, a.currency), 'نوع: حجز'],
     ['المستلم فعلاً', formatUSD(a.received), formatLocalAmount(a.receivedLocal, a.currency), 'إيراد − حجز'],
-    ['إجمالي التكاليف', formatUSD(a.totalCosts), formatLocalAmount(a.totalCostsLocal, a.currency), 'مصاريف + خدمات'],
+    ['إجمالي التكاليف', formatUSD(a.totalCosts), formatLocalAmount(a.totalCostsLocal, a.currency), 'مصاريف وخدمات'],
     ['الربح التقديري', formatUSD(a.profit), formatLocalAmount(a.profitLocal, a.currency), 'إيراد − تكاليف'],
     ['هامش الربح', a.margin !== null ? a.margin.toFixed(1) + '%' : '—', '—', '—'],
   ];
@@ -858,9 +858,9 @@ function buildVisuals(records, userMessage) {
 
     if (a.contractors.length) {
       tables.push({
-        title: 'وضع المقاولين والموردين',
+        title: 'المقاولين والمجهزين والموردين',
         headers: ['الجهة', 'الصافي (USD)', 'نوع السجل', 'الوضع'],
-        rows: a.contractors.map(c => [c.name, formatUSD(c.net), 'المقاوليين/المجهزيين', c.status]),
+        rows: a.contractors.map(c => [c.name, formatUSD(c.net), 'المقاوليين/المجهزيين/الموردين', c.status]),
       });
     }
 
@@ -886,7 +886,7 @@ function buildVisuals(records, userMessage) {
           r.projectName,
           formatUSD(r.net),
           formatLocalCurrency(r),
-          r.net > 0 ? 'مستحق للمقاول' : r.net < 0 ? 'دفعة مقدمة' : 'متوازن',
+          r.net > 0 ? 'مصروف لم يُدفع بعد' : r.net < 0 ? 'أعمال/توريد لاحقاً' : 'متوازن',
         ]),
       });
     }
