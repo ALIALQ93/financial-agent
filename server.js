@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const express = require('express');
 const path = require('path');
+const { buildSheetContext, isSheetConfigured } = require('./sheets');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -14,8 +15,9 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
 
 const SYSTEM_PROMPT = `أنت المحلل المالي لشركة مقاولات. تجيب بالعربية بشكل واضح ومهني.
 تكيّف مستوى التفصيل حسب صفة المستخدم المذكورة في رسالته (مدير عام، مدير مالي، مدير مشروع، محاسب).
-قدّم تحليلاً مالياً عملياً: أرقام، مقارنات، هوامش ربح، وتنبيهات للمخاطر عند الحاجة.
-إذا لم تتوفر بيانات فعلية عن مشروع أو مقاول معيّن، وضّح ذلك واطلب الأرقام أو مصدر البيانات بدلاً من اختلاق أرقام.`;
+اعتمد على بيانات Google Sheets المرفقة في السياق — لا تختلق أرقاماً غير موجودة فيها.
+قدّم تحليلاً مالياً عملياً: أرقام، مقارنات، هوامش، وتنبيهات للمخاطر.
+إذا لم تجد بيانات كافية في الجدول، وضّح ذلك بوضوح.`;
 
 const isConfigured = () => {
   if (AI_PROVIDER === 'gemini') {
@@ -24,7 +26,19 @@ const isConfigured = () => {
   return GROQ_API_KEY && GROQ_API_KEY !== 'YOUR_GROQ_API_KEY';
 };
 
+async function buildUserMessage(userMessage) {
+  try {
+    const sheetContext = await buildSheetContext(userMessage);
+    if (!sheetContext) return userMessage;
+    return `${sheetContext}\n\n---\nسؤال المستخدم:\n${userMessage}`;
+  } catch (err) {
+    console.error('Sheet error:', err.message);
+    return `${userMessage}\n\n[تنبيه: تعذّر تحميل Google Sheet — ${err.message}]`;
+  }
+}
+
 async function chatWithGroq(message) {
+  const content = await buildUserMessage(message);
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -35,7 +49,7 @@ async function chatWithGroq(message) {
       model: GROQ_MODEL,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: message },
+        { role: 'user', content },
       ],
     }),
   });
@@ -51,6 +65,7 @@ async function chatWithGroq(message) {
 }
 
 async function chatWithGemini(message) {
+  const content = await buildUserMessage(message);
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
     {
@@ -58,7 +73,7 @@ async function chatWithGemini(message) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents: [{ role: 'user', parts: [{ text: message }] }],
+        contents: [{ role: 'user', parts: [{ text: content }] }],
       }),
     }
   );
@@ -77,7 +92,11 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
 app.get('/api/health', (_req, res) => {
-  res.json({ configured: isConfigured(), provider: AI_PROVIDER });
+  res.json({
+    configured: isConfigured(),
+    provider: AI_PROVIDER,
+    sheet: isSheetConfigured(),
+  });
 });
 
 app.post('/api/chat', async (req, res) => {
@@ -107,6 +126,11 @@ app.get('/favicon.ico', (_req, res) => res.status(204).end());
 
 app.listen(PORT, () => {
   console.log(`المحلل المالي يعمل على http://localhost:${PORT} (${AI_PROVIDER})`);
+  if (isSheetConfigured()) {
+    console.log(`Google Sheet: ${process.env.GOOGLE_SHEET_ID}`);
+  } else {
+    console.warn('تحذير: أضف GOOGLE_SHEET_ID لربط بيانات Google Sheets');
+  }
   if (!isConfigured()) {
     const keyName = AI_PROVIDER === 'gemini' ? 'GEMINI_API_KEY' : 'GROQ_API_KEY';
     console.warn(`تحذير: أضف ${keyName}`);
