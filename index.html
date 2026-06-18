@@ -228,9 +228,11 @@
 </header>
 
 <div class="config-box" id="configBox">
-  ⚙️ لتشغيل التطبيق محلياً: انسخ <code>.env.example</code> إلى <code>.env</code> وضع <code>TWIN_AGENT_ID</code> و<code>TWIN_API_KEY</code> فيه، ثم شغّل <code>npm start</code>.
+  ⚙️ للتشغيل: انسخ <code>.env.example</code> إلى <code>.env</code> وضع <code>GROQ_API_KEY</code>، ثم شغّل <code>npm start</code>.
   <br><br>
-  <strong>على GitHub:</strong> أضف نفس القيم في Settings → Secrets → Actions
+  <strong>الحصول على المفتاح (مجاني):</strong> <a href="https://console.groq.com/keys" target="_blank">console.groq.com/keys</a>
+  <br>
+  <strong>على Render:</strong> أضف <code>GROQ_API_KEY</code> و <code>AI_PROVIDER=groq</code>
 </div>
 
 <div class="role-bar">
@@ -341,26 +343,22 @@ async function sendMsg() {
 
     if (!isConfigured) {
       loadDiv.className = 'msg agent';
-      loadDiv.innerHTML = '⚠️ الرجاء إضافة TWIN_AGENT_ID و TWIN_API_KEY في ملف .env أو GitHub Secrets.' +
+      loadDiv.innerHTML = '⚠️ الرجاء إضافة GROQ_API_KEY في ملف .env أو Render Environment.' +
         '<div class="msg-time">' + now() + '</div>';
       return;
     }
 
-    const runRes = await fetch('/api/runs', {
+    const chatRes = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ run_mode: 'run', user_message: fullMsg })
+      body: JSON.stringify({ message: fullMsg })
     });
 
-    const runData = await runRes.json();
-    if (!runRes.ok) throw new Error(runData.error || 'فشل بدء التشغيل');
+    const chatData = await chatRes.json();
+    if (!chatRes.ok) throw new Error(chatData.error || 'فشل إرسال الرسالة');
 
-    const runId = runData.run?.run_id;
-    if (!runId) throw new Error('فشل بدء التشغيل');
-
-    const reply = await pollResult(runId);
     loadDiv.className = 'msg agent';
-    loadDiv.innerHTML = escapeHtml(reply).replace(/\n/g,'<br>') +
+    loadDiv.innerHTML = escapeHtml(chatData.reply).replace(/\n/g,'<br>') +
       '<div class="msg-time">' + now() + '</div>';
 
   } catch(e) {
@@ -371,22 +369,6 @@ async function sendMsg() {
     document.getElementById('sendBtn').disabled = false;
     document.getElementById('chatArea').scrollTop = 99999;
   }
-}
-
-async function pollResult(runId) {
-  for (let i = 0; i < 60; i++) {
-    await new Promise(r => setTimeout(r, 3000));
-    const res = await fetch('/api/runs/' + runId + '/events?limit=100');
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'فشل جلب النتيجة');
-    const events = data.events || [];
-    const finished = events.find(e => e.event?.finished || e.event?.stopped || e.event?.failed);
-    if (finished) {
-      const msgEvent = [...events].reverse().find(e => e.event?.message?.role === 'assistant');
-      return msgEvent?.event?.message?.content || 'تم الانتهاء من التحليل.';
-    }
-  }
-  return 'انتهى الوقت. يرجى المحاولة مرة أخرى.';
 }
 </script>
 </body>

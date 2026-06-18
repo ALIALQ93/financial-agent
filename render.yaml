@@ -6,9 +6,9 @@ services:
     buildCommand: npm install
     startCommand: npm start
     envVars:
-      - key: TWIN_AGENT_ID
+      - key: AI_PROVIDER
+        value: groq
+      - key: GROQ_API_KEY
         sync: false
-      - key: TWIN_API_KEY
-        sync: false
-      - key: BASE_URL
-        value: https://build.twin.so
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile

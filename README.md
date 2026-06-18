@@ -1,55 +1,44 @@
 # المحلل المالي
 
-واجهة محادثة عربية لمساعد تحليل البيانات المالية عبر Twin.so.
+واجهة محادثة عربية لمساعد تحليل البيانات المالية — مدعوم بـ **Groq** (مجاني).
 
 ## الأسرار
 
 | الاسم | الاستخدام |
 |-------|-----------|
-| `TWIN_AGENT_ID` | معرّف الوكيل من Twin |
-| `TWIN_API_KEY` | مفتاح API من Twin → Agent → Settings |
+| `GROQ_API_KEY` | مفتاح مجاني من [console.groq.com/keys](https://console.groq.com/keys) |
+| `AI_PROVIDER` | `groq` (افتراضي) أو `gemini` |
+| `GROQ_MODEL` | اختياري — الافتراضي `llama-3.3-70b-versatile` |
 
 ## التشغيل المحلي
 
 ```bash
 cp .env.example .env
-# عدّل .env وأضف قيمك
+# أضف GROQ_API_KEY في .env
 npm install
 npm start
 ```
 
-افتح `http://localhost:3000`
+## النشر على Render
 
-## النشر على GitHub
+في Environment Variables:
 
-### 1. أسرار المستودع (تم إعدادها)
+| Key | Value |
+|-----|-------|
+| `AI_PROVIDER` | `groq` |
+| `GROQ_API_KEY` | مفتاحك من Groq |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` |
 
-في **Settings → Secrets and variables → Actions** أضف:
+## بديل: Google Gemini
 
-- `TWIN_AGENT_ID`
-- `TWIN_API_KEY`
+إذا نجح إنشاء مشروع في Google AI Studio:
 
-عند كل push، يشغّل GitHub Actions اختباراً تلقائياً للتأكد من صحة الإعداد.
+```
+AI_PROVIDER=gemini
+GEMINI_API_KEY=...
+```
 
-### 2. النشر المباشر (Render — مجاني)
+## ملاحظة
 
-GitHub Pages لا يدعم خادم Node.js، لذا نستخدم [Render](https://render.com):
-
-1. أنشئ حساباً على Render واربط مستودع GitHub
-2. اختر **New → Blueprint** وحدّد هذا المستودع (يستخدم `render.yaml`)
-3. في Render → Environment أضف:
-   - `TWIN_AGENT_ID` = نفس قيمة GitHub Secret
-   - `TWIN_API_KEY` = نفس قيمة GitHub Secret
-4. بعد النشر ستحصل على رابط مثل `https://financial-agent.onrender.com`
-
-### 3. (اختياري) نشر تلقائي عبر Deploy Hook
-
-1. في Render → Service → Settings → Deploy Hook → انسخ الرابط
-2. في GitHub أضف سراً جديداً: `RENDER_DEPLOY_HOOK`
-3. عند كل push إلى `main` يُعاد النشر تلقائياً
-
-## الأمان
-
-- لا تضع المفاتيح في `index.html` أو أي ملف يُرفع إلى Git
-- ملف `.env` مستثنى عبر `.gitignore`
-- الخادم يتصل بـ Twin API ولا يُرسل المفتاح للمتصفح
+- لا يتصل تلقائياً ببيانات شركتك من Twin
+- يمكن لاحقاً ربط ملف Excel أو Google Sheets
