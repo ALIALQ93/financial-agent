@@ -247,10 +247,119 @@ function getProjectIndex(records) {
   }));
 }
 
+function detectRecordType(query) {
+  const q = normalizeForSearch(query);
+  if (/المقاولين|مقاولين|مقاول/.test(q)) return 'المقاوليين';
+  if (/المجهزين|مجهزين|مجهز/.test(q)) return 'المجهزيين';
+  if (/الموردين|موردين|مورد/.test(q)) return 'الموردين';
+  if (/الخدمات|خدمات/.test(q)) return 'خدمات';
+  if (/المصاريف|مصاريف/.test(q)) return 'المصاريف';
+  if (/التكاليف|تكاليف|مصروفات|المصروفات/.test(q)) return 'تكاليف';
+  if (/الحجوزات|حجز/.test(q)) return 'حجز';
+  if (/مزاد|فرق عمل/.test(q)) return 'مزاد';
+  if (/الايراد|الإيراد|ايراد|إيراد|ايرادات|إيرادات/.test(q)) return 'ايراد';
+  return null;
+}
+
+const RECORD_TYPE_LABEL = {
+  ايراد: 'ايراد',
+  المصاريف: 'المصاريف',
+  خدمات: 'خدمات',
+  حجز: 'حجز',
+  المقاوليين: 'المقاوليين',
+  المجهزيين: 'المجهزيين',
+  الموردين: 'المقاوليين/المجهزيين/الموردين',
+  مزاد: 'مزاد',
+  تكاليف: 'المصاريف + خدمات',
+};
+
+function filterByRecordType(records, typeKey) {
+  if (!typeKey) return records;
+  if (typeKey === 'تكاليف') {
+    return records.filter(r => r.recordType === 'المصاريف' || r.recordType === 'خدمات');
+  }
+  if (typeKey === 'الموردين') {
+    return records.filter(r =>
+      r.recordType === 'الموردين' || r.recordType === 'المقاوليين' || r.recordType === 'المجهزيين'
+    );
+  }
+  return records.filter(r => r.recordType === typeKey);
+}
+
+function recordTypeMeaning(typeKey, net) {
+  switch (typeKey) {
+    case 'ايراد': return `إيراد ${formatUSD(Math.abs(net))}`;
+    case 'المصاريف':
+    case 'خدمات':
+    case 'تكاليف': return net >= 0 ? 'مصروف مدفوع' : 'مرتجع/خصم';
+    case 'حجز': return 'حجز ضمان (منفصل عن الإيراد)';
+    case 'المقاوليين':
+    case 'المجهزيين':
+    case 'الموردين':
+      if (net > 0) return 'مصروف لم يُدفع بعد';
+      if (net < 0) return 'أعمال/توريد ستُقدَّم لاحقاً';
+      return 'متوازن';
+    case 'مزاد':
+      if (net < 0) return 'ربح فرق عملة';
+      if (net > 0) return 'خسارة فرق عملة';
+      return 'متوازن';
+    default: return '—';
+  }
+}
+
+function sumRecordTypeRows(records, typeKey) {
+  const filtered = filterByRecordType(records, typeKey);
+  let netUsd = 0;
+  let netLocal = 0;
+  for (const r of filtered) {
+    if (typeKey === 'ايراد') {
+      netUsd += Math.abs(r.net);
+      netLocal += localVal(r);
+    } else {
+      netUsd += r.net;
+      netLocal += r.net >= 0 ? localVal(r) : -localVal(r);
+    }
+  }
+  return { filtered, count: filtered.length, netUsd, netLocal };
+}
+
+function detectRecordTypeQuery(query, records) {
+  const type = detectRecordType(query);
+  if (!type) return null;
+
+  const scopeAll = /كل المشاريع|جميع المشاريع|لكل المشاريع|كل مشروع|على مستوى الشركة|مشاريع الشركة|كل المشروع/.test(query);
+
+  let project = null;
+  let ambiguous = false;
+  let candidates = [];
+
+  if (records && !scopeAll) {
+    const res = resolveProjectQuery(records, query);
+    if (res.status === 'unique') project = res.project;
+    else if (res.status === 'ambiguous') {
+      ambiguous = true;
+      candidates = res.candidates;
+    }
+  }
+
+  return {
+    type,
+    label: RECORD_TYPE_LABEL[type] || type,
+    project,
+    scopeAll: scopeAll || (!project && !ambiguous),
+    ambiguous,
+    candidates,
+  };
+}
+
 function detectIntent(query, records) {
   const q = query.toLowerCase();
-  if (/إجمالي|كاملاً|كاملا|الشركة|شركة|ملخص الشركة|تقرير الشركة/.test(q)) return 'company';
-  if (/قارن|مقارنة|هامش|ترتيب|مقارنة بين/.test(q)) return 'comparison';
+  if (/إجمالي|كاملاً|كاملا|الشركة|شركة|ملخص الشركة|تقرير الشركة/.test(q) && !detectRecordType(query)) {
+    return 'company';
+  }
+  if (/قارن|مقارنة|هامش|ترتيب|مقارنة بين/.test(q) && !detectRecordType(query)) return 'comparison';
+  const typeQ = detectRecordTypeQuery(query, records);
+  if (typeQ?.type) return 'record_type';
   if (/مقاول|مورد|مجهز/.test(q)) return 'contractor';
   if (/بلا إيراد|لا إيراد|بدون إيراد|لا تحتوي.*ايراد|مشاريع.*إيراد/.test(q)) return 'no_revenue';
   if (records) {
@@ -934,6 +1043,95 @@ function buildDetailTable(records, title, limit = 50) {
   };
 }
 
+function buildRecordTypeByProjectTable(records, typeKey) {
+  const projects = getAllProjects(records);
+  const rows = projects.map(p => {
+    const scoped = filterByProject(records, p);
+    const s = sumRecordTypeRows(scoped, typeKey);
+    if (!s.count) return null;
+    const cur = dominantCurrency(scoped);
+    return [
+      p.name,
+      p.code,
+      cur,
+      String(s.count),
+      typeKey === 'ايراد' ? formatUSD(s.netUsd) : formatUSD(s.netUsd),
+      formatLocalAmount(Math.abs(s.netLocal), cur),
+      recordTypeMeaning(typeKey, s.netUsd),
+    ];
+  }).filter(Boolean);
+
+  const total = sumRecordTypeRows(records, typeKey);
+  const totalCur = 'USD';
+  rows.push([
+    'الإجمالي',
+    '—',
+    totalCur,
+    String(total.count),
+    formatUSD(total.netUsd),
+    '—',
+    recordTypeMeaning(typeKey, total.netUsd),
+  ]);
+
+  return {
+    title: `تقرير نوع السجل: ${RECORD_TYPE_LABEL[typeKey]} — حسب المشروع`,
+    headers: ['المشروع', 'الكود', 'العملة', 'عدد السجلات', 'مجموع USD', 'مجموع محلي', 'المعنى'],
+    rows,
+  };
+}
+
+function buildRecordTypeReport(records, typeQuery, query) {
+  const { type, label, project, scopeAll, ambiguous, candidates } = typeQuery;
+  let out = `## تقرير نوع السجل: **${label}** — محسوب مسبقاً\n\n`;
+
+  if (ambiguous) {
+    out += `⚠️ ${candidates.map(p => p.name).join(' | ')}\n`;
+    out += 'حدّد المشروع بدقة لعرض تقرير النوع.\n';
+    return out;
+  }
+
+  const scopeRecords = project ? filterByProject(records, project) : records;
+  const summary = sumRecordTypeRows(scopeRecords, type);
+  const scopeLabel = project ? `مشروع: ${project.name} (${project.code})` : 'كل المشاريع';
+
+  out += `**النطاق:** ${scopeLabel}\n`;
+  out += `**عدد السجلات:** ${summary.count}\n`;
+  out += `**مجموع USD:** ${formatUSD(summary.netUsd)}\n`;
+  out += `**المعنى:** ${recordTypeMeaning(type, summary.netUsd)}\n\n`;
+
+  if (!summary.count) {
+    out += `⚠️ لا توجد سجلات من نوع "${label}" في هذا النطاق.\n`;
+    return out;
+  }
+
+  if (scopeAll && !project) {
+    const projects = getAllProjects(records);
+    out += `**[ ملخص حسب المشروع ]**\n`;
+    out += `| المشروع | عدد | USD | المعنى |\n|---------|-----|-----|--------|\n`;
+    for (const p of projects) {
+      const s = sumRecordTypeRows(filterByProject(records, p), type);
+      if (!s.count) continue;
+      out += `| ${p.name} | ${s.count} | ${formatUSD(s.netUsd)} | ${recordTypeMeaning(type, s.netUsd)} |\n`;
+    }
+    out += '\n';
+  }
+
+  if (['المقاوليين', 'المجهزيين', 'الموردين'].includes(type)) {
+    const byAccount = new Map();
+    for (const r of summary.filtered) {
+      const key = r.accountName;
+      byAccount.set(key, (byAccount.get(key) || 0) + r.net);
+    }
+    out += `**[ حسب الجهة ]**\n`;
+    for (const [name, net] of [...byAccount.entries()].sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))) {
+      out += `- ${name}: ${formatUSD(net)} — ${recordTypeMeaning(type, net)}\n`;
+    }
+    out += '\n';
+  }
+
+  return out;
+}
+
 function buildVisuals(records, userMessage) {
   const query = cleanQuery(userMessage);
   const intent = detectIntent(query, records);
@@ -1041,6 +1239,70 @@ function buildVisuals(records, userMessage) {
     }
   }
 
+  if (intent === 'record_type') {
+    const typeQuery = detectRecordTypeQuery(query, records);
+    if (!typeQuery || typeQuery.ambiguous) {
+      if (typeQuery?.ambiguous) {
+        tables.push(buildDisambiguationTable(records, typeQuery.candidates));
+      }
+    } else if (typeQuery.scopeAll && !typeQuery.project) {
+      tables.push(buildRecordTypeByProjectTable(records, typeQuery.type));
+      const projects = getAllProjects(records);
+      const chartData = projects.map(p => {
+        const s = sumRecordTypeRows(filterByProject(records, p), typeQuery.type);
+        return { label: (p.code || p.name).slice(0, 16), value: s.netUsd, count: s.count };
+      }).filter(x => x.count > 0).sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+
+      if (chartData.length > 1) {
+        charts.push({
+          type: 'bar',
+          title: `مجموع ${typeQuery.label} — حسب المشروع (USD)`,
+          labels: chartData.map(x => x.label),
+          datasets: [{
+            label: typeQuery.label,
+            data: chartData.map(x => typeQuery.type === 'ايراد' ? Math.abs(x.value) : x.value),
+            color: typeQuery.type === 'ايراد' ? CHART_THEME.revenue : CHART_THEME.costs,
+          }],
+          horizontal: chartData.length > 6,
+        });
+      }
+
+      const total = sumRecordTypeRows(records, typeQuery.type);
+      tables.push(buildDetailTable(total.filtered, `تفاصيل سجلات ${typeQuery.label} — كل المشاريع`, 60));
+    } else if (typeQuery.project) {
+      const scoped = filterByProject(records, typeQuery.project);
+      const summary = sumRecordTypeRows(scoped, typeQuery.type);
+      const cur = dominantCurrency(scoped);
+
+      tables.push({
+        title: `${typeQuery.label} — ${typeQuery.project.name}`,
+        headers: ['البند', 'القيمة'],
+        rows: [
+          ['عدد السجلات', String(summary.count)],
+          ['مجموع USD', formatUSD(summary.netUsd)],
+          ['مجموع محلي', formatLocalAmount(Math.abs(summary.netLocal), cur)],
+          ['المعنى', recordTypeMeaning(typeQuery.type, summary.netUsd)],
+        ],
+      });
+
+      if (['المقاوليين', 'المجهزيين', 'الموردين'].includes(typeQuery.type)) {
+        const byAccount = new Map();
+        for (const r of summary.filtered) {
+          byAccount.set(r.accountName, (byAccount.get(r.accountName) || 0) + r.net);
+        }
+        tables.push({
+          title: `${typeQuery.label} — حسب الجهة`,
+          headers: ['الجهة', 'الصافي USD', 'الوضع'],
+          rows: [...byAccount.entries()]
+            .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+            .map(([name, net]) => [name, formatUSD(net), recordTypeMeaning(typeQuery.type, net)]),
+        });
+      }
+
+      tables.push(buildDetailTable(summary.filtered, `سجلات ${typeQuery.label} — التفصيل`, 80));
+    }
+  }
+
   if (intent === 'project') {
     const resolution = resolveProjectQuery(records, query);
     if (resolution.status === 'unique') {
@@ -1139,6 +1401,8 @@ function buildContext(records, userMessage) {
   let out = `تاريخ البيانات: من Google Sheets\n`;
   out += `عدد السجلات: ${records.length} | عدد المشاريع: ${getAllProjects(records).length}\n`;
   if (role) out += `دور المستخدم المحدد: **${role}**\n`;
+  const typeQ = detectRecordTypeQuery(query, records);
+  if (typeQ) out += `نوع السجل المطلوب: **${typeQ.label}**\n`;
   out += `نوع السؤال المكتشف: ${intent}\n\n`;
 
   switch (intent) {
@@ -1154,6 +1418,11 @@ function buildContext(records, userMessage) {
     case 'no_revenue':
       out += buildNoRevenueReport(records);
       break;
+    case 'record_type': {
+      const typeQuery = detectRecordTypeQuery(query, records);
+      if (typeQuery) out += buildRecordTypeReport(records, typeQuery, query);
+      break;
+    }
     case 'project': {
       const resolution = resolveProjectQuery(records, query);
       if (resolution.status === 'unique') {
@@ -1197,6 +1466,9 @@ module.exports = {
   extractRole,
   cleanQuery,
   detectIntent,
+  detectRecordType,
+  detectRecordTypeQuery,
+  filterByRecordType,
   findMatchingProjects,
   resolveProjectQuery,
   describeProjectMatch,
