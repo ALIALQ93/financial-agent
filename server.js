@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const express = require('express');
 const path = require('path');
-const { buildSheetReport, isSheetConfigured } = require('./sheets');
+const { buildSheetReport, listProjects, isSheetConfigured } = require('./sheets');
 const { SYSTEM_PROMPT } = require('./prompt');
 const { extractRole, cleanQuery } = require('./analytics');
 
@@ -103,6 +103,15 @@ app.get('/api/health', (_req, res) => {
     provider: AI_PROVIDER,
     sheet: isSheetConfigured(),
   });
+});
+
+app.get('/api/projects', async (_req, res) => {
+  try {
+    const projects = await listProjects();
+    res.json({ projects });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
 });
 
 app.post('/api/chat', async (req, res) => {

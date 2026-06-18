@@ -1,4 +1,4 @@
-const { normalizeRecord, buildContext, buildVisuals } = require('./analytics');
+const { normalizeRecord, buildContext, buildVisuals, getProjectsForUI } = require('./analytics');
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const SHEET_GID = process.env.GOOGLE_SHEET_GID || '0';
@@ -95,9 +95,17 @@ function isSheetConfigured() {
   return Boolean(SHEET_ID);
 }
 
+async function listProjects() {
+  if (!SHEET_ID) return [];
+  const rows = await fetchSheetRows();
+  const records = rowsToRecords(rows);
+  return getProjectsForUI(records);
+}
+
 module.exports = {
   buildSheetContext,
   buildSheetReport,
+  listProjects,
   isSheetConfigured,
   fetchSheetRows,
 };

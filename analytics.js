@@ -21,6 +21,35 @@ function formatLocalCurrency(rec) {
   return `${formatted} ${cur}`;
 }
 
+function formatLocalAmount(amount, currency) {
+  const formatted = Math.abs(amount).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  return `${formatted} ${currency || 'USD'}`;
+}
+
+function localVal(r) {
+  const v = Math.abs(r.localValue);
+  return v > 0 ? v : Math.abs(r.net);
+}
+
+function dominantCurrency(records) {
+  const counts = {};
+  for (const r of records) {
+    if (r.currency) counts[r.currency] = (counts[r.currency] || 0) + 1;
+  }
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  return sorted[0]?.[0] || 'USD';
+}
+
+/** ألوان المخططات — لوحة احترافية */
+const CHART_THEME = {
+  revenue: '#2d6a4f',
+  costs: '#9b2226',
+  profit: '#1e3a5f',
+  accent: '#ca9a2e',
+  margin: '#457b9d',
+  palette: ['#1e3a5f', '#2d5a7b', '#457b9d', '#5c8eb3', '#73a9c9', '#ca9a2e', '#2d6a4f', '#6b705c'],
+};
+
 const TYPE_LABELS = {
   revenue: 'ايراد',
   expense: 'المصاريف',
@@ -103,11 +132,11 @@ function cleanQuery(message) {
 
 function detectIntent(query) {
   const q = query.toLowerCase();
-  if (/إجمالي|كاملاً|كاملا|الشركة|شركة/.test(q)) return 'company';
-  if (/قارن|مقارنة|هامش|ترتيب/.test(q)) return 'comparison';
+  if (/إجمالي|كاملاً|كاملا|الشركة|شركة|ملخص الشركة|تقرير الشركة/.test(q)) return 'company';
+  if (/قارن|مقارنة|هامش|ترتيب|مقارنة بين/.test(q)) return 'comparison';
   if (/مقاول|مورد|مجهز/.test(q)) return 'contractor';
-  if (/بلا إيراد|لا إيراد|بدون إيراد|مشاريع.*إيراد/.test(q)) return 'no_revenue';
-  if (/تقرير|مشروع|034|001|020|057|karbala|ohtl|واحة|غراف|زيونة/.test(q)) return 'project';
+  if (/بلا إيراد|لا إيراد|بدون إيراد|لا تحتوي.*ايراد|مشاريع.*إيراد/.test(q)) return 'no_revenue';
+  if (/تقرير|مشروع|034|001|020|057|karbala|كربلاء|ohtl|واحة|غراف|زيونة/.test(q)) return 'project';
   return 'general';
 }
 
@@ -136,7 +165,7 @@ function scoreProjectMatch(project, query) {
 
   const keywords = [
     ['ohtl', 'ohtl'], ['upgrade', 'upgrade'], ['034', '034'],
-    ['karbala', 'karbala'], ['واحة', 'waha'], ['al-waha', 'waha'],
+    ['karbala', 'karbala'], ['كربلاء', 'karbala'], ['واحة', 'waha'], ['al-waha', 'waha'],
     ['chemical', 'chemical'], ['fsf', 'fsf'], ['epcc', 'epcc'],
     ['001', '001'], ['غراف', 'غراف'], ['زيونة', 'زيونة'],
     ['single', 'single'], ['diesel', 'diesel'], ['057', '057'],
@@ -175,32 +204,44 @@ function filterByProject(records, project) {
 
 function analyzeProjectRecords(records) {
   let revenue = 0;
+  let revenueLocal = 0;
   let reservation = 0;
+  let reservationLocal = 0;
   let expenses = 0;
+  let expensesLocal = 0;
   let services = 0;
   let auctionNet = 0;
   const expenseGroups = new Map();
+  const expenseGroupsLocal = new Map();
   const contractors = new Map();
   const alerts = [];
+  const currency = dominantCurrency(records);
 
   for (const r of records) {
     const cls = classifyRecord(r);
+    const local = localVal(r);
 
     switch (cls) {
       case 'revenue':
         revenue += Math.abs(r.net);
+        revenueLocal += local;
         break;
       case 'reservation':
         reservation += r.net;
+        reservationLocal += local;
         break;
       case 'expense':
         expenses += r.net;
+        expensesLocal += local;
         expenseGroups.set(r.group, (expenseGroups.get(r.group) || 0) + r.net);
+        expenseGroupsLocal.set(r.group, (expenseGroupsLocal.get(r.group) || 0) + local);
         break;
       case 'services':
         services += r.net;
         expenses += r.net;
+        expensesLocal += local;
         expenseGroups.set('خدمات', (expenseGroups.get('خدمات') || 0) + r.net);
+        expenseGroupsLocal.set('خدمات', (expenseGroupsLocal.get('خدمات') || 0) + local);
         break;
       case 'auction':
         auctionNet += r.net;
@@ -239,6 +280,7 @@ function analyzeProjectRecords(records) {
     .map(([group, amount]) => ({
       group,
       amount,
+      amountLocal: expenseGroupsLocal.get(group) || 0,
       pct: totalCosts > 0 ? (amount / totalCosts) * 100 : 0,
     }))
     .sort((a, b) => b.amount - a.amount);
@@ -250,12 +292,18 @@ function analyzeProjectRecords(records) {
 
   return {
     revenue,
+    revenueLocal,
     reservation,
+    reservationLocal,
     received,
+    receivedLocal: revenueLocal - reservationLocal,
     totalCosts,
+    totalCostsLocal: expensesLocal,
     services,
     profit,
+    profitLocal: revenueLocal - expensesLocal,
     margin,
+    currency,
     auctionNet,
     auctionProfit: auctionNet < 0 ? Math.abs(auctionNet) : 0,
     auctionLoss: auctionNet > 0 ? auctionNet : 0,
@@ -441,6 +489,34 @@ function buildNoRevenueReport(records) {
   return out;
 }
 
+function getProjectsForUI(records) {
+  return getAllProjects(records).map(p => {
+    const filtered = filterByProject(records, p);
+    const a = analyzeProjectRecords(filtered);
+    return {
+      code: p.code,
+      name: p.name,
+      currency: a.currency,
+      hasRevenue: a.hasRevenue,
+      revenue: a.revenue,
+    };
+  }).sort((a, b) => {
+    if (a.hasRevenue !== b.hasRevenue) return Number(b.hasRevenue) - Number(a.hasRevenue);
+    return b.revenue - a.revenue;
+  });
+}
+
+function projectSummaryRows(a) {
+  return [
+    ['الإيراد الكلي', formatUSD(a.revenue), formatLocalAmount(a.revenueLocal, a.currency), 'نوع: ايراد'],
+    ['الحجز لدى العميل', formatUSD(a.reservation), formatLocalAmount(a.reservationLocal, a.currency), 'نوع: حجز'],
+    ['المستلم فعلاً', formatUSD(a.received), formatLocalAmount(a.receivedLocal, a.currency), 'إيراد − حجز'],
+    ['إجمالي التكاليف', formatUSD(a.totalCosts), formatLocalAmount(a.totalCostsLocal, a.currency), 'مصاريف + خدمات'],
+    ['الربح التقديري', formatUSD(a.profit), formatLocalAmount(a.profitLocal, a.currency), 'إيراد − تكاليف'],
+    ['هامش الربح', a.margin !== null ? a.margin.toFixed(1) + '%' : '—', '—', '—'],
+  ];
+}
+
 function buildDetailTable(records, title, limit = 50) {
   const rows = records.slice(0, limit).map(r => [
     r.recordType,
@@ -470,13 +546,20 @@ function buildVisuals(records, userMessage) {
     const all = getAllProjects(records);
     const rows = all.map(p => {
       const a = analyzeProjectRecords(filterByProject(records, p));
-      return [p.name, formatUSD(a.revenue), formatUSD(a.totalCosts), formatUSD(a.profit),
-        a.margin !== null ? a.margin.toFixed(1) + '%' : '—'];
+      return [
+        p.name,
+        a.currency,
+        formatUSD(a.revenue),
+        formatLocalAmount(a.revenueLocal, a.currency),
+        formatUSD(a.totalCosts),
+        formatLocalAmount(a.totalCostsLocal, a.currency),
+        a.margin !== null ? a.margin.toFixed(1) + '%' : '—',
+      ];
     });
 
     tables.push({
       title: 'ملخص الشركة — حسب المشروع',
-      headers: ['المشروع', 'الإيراد (USD)', 'التكاليف (USD)', 'الربح (USD)', 'الهامش %'],
+      headers: ['المشروع', 'العملة', 'الإيراد USD', 'الإيراد محلي', 'التكاليف USD', 'التكاليف محلي', 'الهامش %'],
       rows,
     });
 
@@ -492,8 +575,8 @@ function buildVisuals(records, userMessage) {
         title: 'الإيراد مقابل التكاليف — أبرز المشاريع',
         labels: top.map(x => x.label),
         datasets: [
-          { label: 'الإيراد', data: top.map(x => x.revenue), color: '#2e7d32' },
-          { label: 'التكاليف', data: top.map(x => x.costs), color: '#c62828' },
+          { label: 'الإيراد', data: top.map(x => x.revenue), color: CHART_THEME.revenue },
+          { label: 'التكاليف', data: top.map(x => x.costs), color: CHART_THEME.costs },
         ],
       });
     }
@@ -504,31 +587,58 @@ function buildVisuals(records, userMessage) {
     const rows = all.map(p => {
       const a = analyzeProjectRecords(filterByProject(records, p));
       if (!a.hasRevenue) return null;
-      return [p.name, formatUSD(a.revenue), formatUSD(a.totalCosts), formatUSD(a.profit),
-        a.margin !== null ? a.margin.toFixed(1) + '%' : '—'];
-    }).filter(Boolean).sort((a, b) => parseFloat(b[4]) - parseFloat(a[4]));
+      return [
+        p.name,
+        a.currency,
+        formatUSD(a.revenue),
+        formatLocalAmount(a.revenueLocal, a.currency),
+        formatUSD(a.totalCosts),
+        formatLocalAmount(a.totalCostsLocal, a.currency),
+        formatUSD(a.profit),
+        a.margin !== null ? a.margin.toFixed(1) + '%' : '—',
+      ];
+    }).filter(Boolean).sort((a, b) => parseFloat(b[7]) - parseFloat(a[7]));
 
     rows.forEach((r, i) => r.unshift(String(i + 1)));
 
     tables.push({
-      title: 'مقارنة المشاريع — حسب هامش الربح',
-      headers: ['#', 'المشروع', 'الإيراد', 'التكاليف', 'الربح', 'الهامش %'],
+      title: 'مقارنة المشاريع — USD وبعملة كل مشروع',
+      headers: ['#', 'المشروع', 'العملة', 'الإيراد USD', 'الإيراد محلي', 'التكاليف USD', 'التكاليف محلي', 'الربح USD', 'الهامش %'],
       rows,
     });
 
-    const sorted = all.map(p => ({
-      label: (p.code || p.name).slice(0, 18),
-      margin: analyzeProjectRecords(filterByProject(records, p)).margin,
-      hasRevenue: analyzeProjectRecords(filterByProject(records, p)).hasRevenue,
-    })).filter(x => x.hasRevenue && x.margin !== null).sort((a, b) => b.margin - a.margin);
+    const sorted = all.map(p => {
+      const a = analyzeProjectRecords(filterByProject(records, p));
+      return {
+        label: (p.code || p.name).slice(0, 18),
+        margin: a.margin,
+        hasRevenue: a.hasRevenue,
+      };
+    }).filter(x => x.hasRevenue && x.margin !== null).sort((a, b) => b.margin - a.margin);
 
     if (sorted.length) {
       charts.push({
         type: 'bar',
         title: 'هامش الربح % — المشاريع',
         labels: sorted.map(x => x.label),
-        datasets: [{ label: 'الهامش %', data: sorted.map(x => +x.margin.toFixed(1)), color: '#e8b84b' }],
+        datasets: [{ label: 'الهامش %', data: sorted.map(x => +x.margin.toFixed(1)), color: CHART_THEME.margin }],
         horizontal: true,
+      });
+    }
+
+    const withRevenue = all
+      .map(p => ({ p, a: analyzeProjectRecords(filterByProject(records, p)) }))
+      .filter(x => x.a.hasRevenue);
+
+    if (withRevenue.length) {
+      charts.push({
+        type: 'bar',
+        title: 'مقارنة الإيراد والتكاليف (USD)',
+        labels: withRevenue.map(x => (x.p.code || x.p.name).slice(0, 14)),
+        datasets: [
+          { label: 'الإيراد', data: withRevenue.map(x => x.a.revenue), color: CHART_THEME.revenue },
+          { label: 'التكاليف', data: withRevenue.map(x => x.a.totalCosts), color: CHART_THEME.costs },
+        ],
       });
     }
   }
@@ -539,23 +649,21 @@ function buildVisuals(records, userMessage) {
     const a = analyzeProjectRecords(filtered);
 
     tables.push({
-      title: `ملخص مشروع: ${project.name}`,
-      headers: ['البند', 'الصافي (USD)', 'نوع السجل / المعنى'],
-      rows: [
-        ['الإيراد الكلي', formatUSD(a.revenue), 'مجموع سجلات نوع: ايراد'],
-        ['الحجز لدى العميل', formatUSD(a.reservation), 'نوع: حجز — منفصل عن الإيراد'],
-        ['المستلم فعلاً', formatUSD(a.received), 'إيراد − حجز'],
-        ['إجمالي التكاليف', formatUSD(a.totalCosts), 'مصاريف + خدمات'],
-        ['الربح التقديري', formatUSD(a.profit), 'إيراد − تكاليف'],
-        ['هامش الربح', a.margin !== null ? a.margin.toFixed(1) + '%' : '—', '—'],
-      ],
+      title: `ملخص مشروع: ${project.name} (${a.currency})`,
+      headers: ['البند', 'الصافي (USD)', 'القيمة بعملة المشروع', 'نوع السجل / المعنى'],
+      rows: projectSummaryRows(a),
     });
 
     if (a.expenseList.length) {
       tables.push({
         title: 'تفصيل التكاليف حسب المجموعة',
-        headers: ['المجموعة الرئيسية', 'الصافي (USD)', 'النسبة %'],
-        rows: a.expenseList.map(e => [e.group, formatUSD(e.amount), e.pct.toFixed(1) + '%']),
+        headers: ['المجموعة', 'الصافي (USD)', `بعملة المشروع (${a.currency})`, 'النسبة %'],
+        rows: a.expenseList.map(e => [
+          e.group,
+          formatUSD(e.amount),
+          formatLocalAmount(e.amountLocal, a.currency),
+          e.pct.toFixed(1) + '%',
+        ]),
       });
 
       charts.push({
@@ -563,6 +671,7 @@ function buildVisuals(records, userMessage) {
         title: 'توزيع التكاليف',
         labels: a.expenseList.slice(0, 8).map(e => e.group.slice(0, 20)),
         datasets: [{ label: 'التكاليف', data: a.expenseList.slice(0, 8).map(e => e.amount) }],
+        colors: CHART_THEME.palette,
       });
     }
 
@@ -670,6 +779,7 @@ module.exports = {
   normalizeRecord,
   buildContext,
   buildVisuals,
+  getProjectsForUI,
   extractRole,
   cleanQuery,
   detectIntent,
@@ -680,5 +790,7 @@ module.exports = {
   interpretRecord,
   formatUSD,
   formatLocalCurrency,
+  formatLocalAmount,
   classifyRecord,
+  CHART_THEME,
 };

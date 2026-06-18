@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+
+<html dir="rtl" lang="ar"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>المحلل المالي - Smart Financial Agent</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Load Tailwind Config -->
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                "on-secondary-fixed-variant": "#3a485c",
+                "on-secondary": "#ffffff",
+                "on-error": "#ffffff",
+                "primary-fixed": "#e2e0fc",
+                "on-tertiary-container": "#009768",
+                "on-primary-container": "#83829b",
+                "secondary": "#515f74",
+                "inverse-primary": "#c6c4df",
+                "on-background": "#0b1c30",
+                "tertiary-container": "#002114",
+                "secondary-container": "#d5e3fd",
+                "primary-fixed-dim": "#c6c4df",
+                "data-up": "#10B981",
+                "surface": "#f8f9ff",
+                "secondary-fixed-dim": "#b9c7e0",
+                "tertiary": "#000000",
+                "on-primary": "#ffffff",
+                "secondary-fixed": "#d5e3fd",
+                "data-down": "#EF4444",
+                "error-container": "#ffdad6",
+                "on-primary-fixed": "#1a1a2e",
+                "surface-container": "#e5eeff",
+                "background": "#f8f9ff",
+                "surface-bright": "#f8f9ff",
+                "surface-tint": "#5d5c74",
+                "on-tertiary-fixed": "#002113",
+                "surface-dim": "#cbdbf5",
+                "tertiary-fixed": "#6ffbbe",
+                "surface-light": "#F8FAFC",
+                "on-error-container": "#93000a",
+                "inverse-on-surface": "#eaf1ff",
+                "error": "#ba1a1a",
+                "surface-container-lowest": "#ffffff",
+                "outline": "#78767d",
+                "on-primary-fixed-variant": "#45455b",
+                "surface-variant": "#d3e4fe",
+                "accent-gold": "#E8B84B",
+                "outline-variant": "#c8c5cd",
+                "surface-container-high": "#dce9ff",
+                "on-secondary-fixed": "#0d1c2f",
+                "primary": "#00000b",
+                "tertiary-fixed-dim": "#4edea3",
+                "on-tertiary": "#ffffff",
+                "primary-container": "#1a1a2e",
+                "on-surface-variant": "#47464c",
+                "on-surface": "#0b1c30",
+                "on-tertiary-fixed-variant": "#005236",
+                "surface-container-low": "#eff4ff",
+                "surface-dark": "#0F172A",
+                "on-secondary-container": "#57657b",
+                "inverse-surface": "#213145",
+                "surface-container-highest": "#d3e4fe"
+            },
+            "borderRadius": {
+                "DEFAULT": "0.125rem",
+                "lg": "0.25rem",
+                "xl": "0.5rem",
+                "full": "0.75rem"
+            },
+            "spacing": {
+                "gutter": "24px",
+                "margin-desktop": "48px",
+                "container-max": "1440px",
+                "margin-mobile": "16px",
+                "base": "4px"
+            },
+            "fontFamily": {
+                "headline-lg": ["IBM Plex Sans Arabic"],
+                "headline-md": ["IBM Plex Sans Arabic"],
+                "headline-sm": ["IBM Plex Sans Arabic"],
+                "body-lg": ["IBM Plex Sans Arabic"],
+                "body-md": ["IBM Plex Sans Arabic"],
+                "body-sm": ["IBM Plex Sans Arabic"],
+                "label-lg": ["IBM Plex Sans Arabic"],
+                "label-md": ["IBM Plex Sans Arabic"],
+                "data-mono": ["monospace"]
+            },
+            "fontSize": {
+                "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                "headline-md": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                "headline-sm": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}],
+                "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                "label-lg": ["14px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                "label-md": ["12px", {"lineHeight": "16px", "fontWeight": "500"}]
+            }
+          }
+        }
+      }
+    </script>
+<style>
+        body {
+            font-family: 'IBM Plex Sans Arabic', sans-serif;
+            background-color: #f8f9ff;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .chat-container::-webkit-scrollbar {
+            width: 6px;
+        }
+        .chat-container::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 10px;
+        }
+        .bento-card {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .bento-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05);
+        }
+        /* Custom prompt interaction */
+        .prompt-input:focus-within {
+            box-shadow: 0 0 0 2px rgba(0, 0, 11, 0.1);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface flex h-screen overflow-hidden">
+<!-- Side Navigation Bar -->
+<aside class="fixed right-0 top-0 h-full flex flex-col py-6 border-l border-outline-variant bg-surface-container-low w-64 z-50">
+<div class="px-6 mb-8 flex flex-col gap-1">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-on-primary">
+<span class="material-symbols-outlined">analytics</span>
+</div>
+<div>
+<h1 class="font-headline-sm text-headline-sm font-black text-on-background">المحلل الذكي</h1>
+<p class="text-label-md text-on-surface-variant">نظام إدارة البيانات</p>
+</div>
+</div>
+</div>
+<nav class="flex-1 flex flex-col gap-1">
+<a class="bg-secondary-container text-on-secondary-container rounded-xl mx-2 my-1 flex items-center px-4 py-3 font-label-lg text-label-lg transition-all" href="#">
+<span class="material-symbols-outlined ml-3">dashboard</span>
+<span>لوحة التحكم</span>
+</a>
+<a class="text-on-surface-variant flex items-center px-4 py-3 mx-2 my-1 hover:bg-surface-variant rounded-xl font-label-lg text-label-lg transition-all" href="#">
+<span class="material-symbols-outlined ml-3">analytics</span>
+<span>تحليل البيانات</span>
+</a>
+<a class="text-on-surface-variant flex items-center px-4 py-3 mx-2 my-1 hover:bg-surface-variant rounded-xl font-label-lg text-label-lg transition-all" href="#">
+<span class="material-symbols-outlined ml-3">account_tree</span>
+<span>المشاريع</span>
+</a>
+<a class="text-on-surface-variant flex items-center px-4 py-3 mx-2 my-1 hover:bg-surface-variant rounded-xl font-label-lg text-label-lg transition-all" href="#">
+<span class="material-symbols-outlined ml-3">engineering</span>
+<span>المقاولون</span>
+</a>
+<a class="text-on-surface-variant flex items-center px-4 py-3 mx-2 my-1 hover:bg-surface-variant rounded-xl font-label-lg text-label-lg transition-all" href="#">
+<span class="material-symbols-outlined ml-3">settings</span>
+<span>الإعدادات</span>
+</a>
+</nav>
+<div class="px-4 mt-auto">
+<button class="w-full bg-primary text-on-primary font-label-lg text-label-lg py-3 rounded-xl flex items-center justify-center gap-2 mb-4 hover:opacity-90 transition-all">
+<span class="material-symbols-outlined">sync</span>
+<span>تحديث البيانات</span>
+</button>
+<a class="text-on-surface-variant flex items-center px-4 py-3 hover:bg-surface-variant rounded-xl font-label-lg text-label-lg transition-all" href="#">
+<span class="material-symbols-outlined ml-3">logout</span>
+<span>تسجيل الخروج</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Canvas -->
+<main class="flex-1 mr-64 flex flex-col relative h-full">
+<!-- Top App Bar -->
+<header class="h-16 flex justify-between items-center w-full px-12 border-b border-outline-variant bg-surface">
+<div class="flex items-center gap-8">
+<span class="font-headline-md text-headline-md font-bold text-primary">المحلل المالي</span>
+<nav class="hidden md:flex gap-6">
+<a class="font-label-lg text-label-lg text-primary border-b-2 border-primary pb-1" href="#">الرئيسية</a>
+<a class="font-label-lg text-label-lg text-on-surface-variant hover:text-primary transition-colors" href="#">التقارير</a>
+<a class="font-label-lg text-label-lg text-on-surface-variant hover:text-primary transition-colors" href="#">البيانات</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex items-center bg-surface-container h-10 px-4 rounded-full gap-2 text-on-surface-variant min-w-[240px]">
+<span class="material-symbols-outlined text-[20px]">search</span>
+<input class="bg-transparent border-none focus:ring-0 text-sm flex-1 placeholder:text-on-surface-variant" placeholder="بحث سريع..." type="text"/>
+</div>
+<div class="flex items-center gap-2">
+<button class="p-2 text-on-surface-variant hover:bg-surface-variant rounded-full transition-colors">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="p-2 text-on-surface-variant hover:bg-surface-variant rounded-full transition-colors">
+<span class="material-symbols-outlined">settings</span>
+</button>
+<div class="h-8 w-[1px] bg-outline-variant mx-2"></div>
+<div class="flex items-center gap-3">
+<div class="text-left hidden sm:block">
+<p class="text-label-md font-bold leading-none">أحمد المحلل</p>
+<p class="text-[10px] text-on-surface-variant">مدير مالي</p>
+</div>
+<img class="w-10 h-10 rounded-full border border-outline-variant object-cover" data-alt="A professional portrait of a financial analyst in a modern office, wearing a smart suit, blurred background with data screens, high-end photography style, soft professional lighting." src="https://lh3.googleusercontent.com/aida-public/AB6AXuB9dUvXe0MJVUbyx5laFq2N9HUi9K2emyMufzPaA-LI3FqGzWoYO9GHjEjcBKIsYPDJ7ZJMVMlYYnPTXHjD0wxlfXzv5Z0-rTHFcUaaJuLAM7qs8lvVKgSXXe5Ls1EyQvnNhhvVgsZfwchoFUiOsFN5rJZQuJVKgj_VoS2fg2agKpgq8fngKRZ7-6lCyggQh0QOg12QoPp_U9JeI-BpPBKWXIZdz3-dSeNvwplNkDb7unWe1PxcgWGMotP1D5JD9hwqeU1ghW7jAgW8"/>
+</div>
+</div>
+</div>
+</header>
+<!-- Scrollable Content Area -->
+<section class="flex-1 overflow-y-auto p-12 chat-container pb-40">
+<!-- Connection Notification -->
+<div class="bg-accent-gold/10 border border-accent-gold/30 rounded-2xl p-6 mb-10 flex items-center justify-between">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 bg-accent-gold/20 rounded-full flex items-center justify-center text-accent-gold">
+<span class="material-symbols-outlined">settings_input_component</span>
+</div>
+<div>
+<h4 class="font-headline-sm text-headline-sm text-on-surface">إعدادات التشغيل والربط</h4>
+<p class="text-body-sm text-on-surface-variant mt-1">
+                            ⚙️ للتشغيل: انسخ <code class="bg-surface-container px-1 rounded">.env.example</code> إلى <code class="bg-surface-container px-1 rounded">.env</code> وضع <code class="bg-surface-container px-1 rounded">GROQ_API_KEY</code>، ثم شغّل <code class="bg-surface-container px-1 rounded">npm start</code>.
+                        </p>
+</div>
+</div>
+<div class="flex gap-3">
+<a class="px-4 py-2 bg-surface-container-lowest border border-outline-variant rounded-lg text-body-sm hover:bg-surface-variant transition-all font-medium" href="https://console.groq.com/keys" target="_blank">الحصول على المفتاح (مجاني)</a>
+<button class="px-4 py-2 bg-on-background text-on-primary rounded-lg text-body-sm hover:opacity-90 transition-all font-medium">إضافة لـ Render</button>
+</div>
+</div>
+<!-- Role Selection -->
+<div class="mb-12">
+<div class="flex items-center justify-between mb-4">
+<h3 class="font-headline-sm text-headline-sm flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">person_search</span>
+                        صفتك الحالية:
+                    </h3>
+</div>
+<div class="flex flex-wrap gap-3">
+<button class="px-6 py-3 rounded-full bg-primary text-on-primary font-label-lg text-label-lg shadow-md transition-all">مدير عام</button>
+<button class="px-6 py-3 rounded-full bg-surface-container-highest text-on-surface hover:bg-surface-variant font-label-lg text-label-lg transition-all">مدير مالي</button>
+<button class="px-6 py-3 rounded-full bg-surface-container-highest text-on-surface hover:bg-surface-variant font-label-lg text-label-lg transition-all">مدير مشروع</button>
+<button class="px-6 py-3 rounded-full bg-surface-container-highest text-on-surface hover:bg-surface-variant font-label-lg text-label-lg transition-all">محاسب</button>
+</div>
+</div>
+<!-- Welcome/Chat Content -->
+<div class="max-w-4xl mx-auto flex flex-col gap-8">
+<!-- AI Introduction Card -->
+<div class="bento-card bg-surface-container-lowest border border-outline-variant p-8 rounded-[32px] relative overflow-hidden">
+<div class="absolute -top-12 -left-12 w-48 h-48 bg-primary/5 rounded-full blur-3xl"></div>
+<div class="relative z-10">
+<div class="flex items-start gap-6">
+<div class="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center text-on-primary flex-shrink-0 shadow-lg">
+<span class="material-symbols-outlined text-[32px]">psychology</span>
+</div>
+<div class="flex flex-col gap-4">
+<h2 class="font-headline-md text-headline-md text-primary leading-tight">مرحباً! أنا المحلل المالي الذكي.</h2>
+<p class="text-body-lg text-body-lg leading-relaxed text-on-surface-variant">
+                                    أقوم بقراءة وتحليل بيانات الشركة من <span class="font-bold text-on-surface">Google Sheets</span> بشكل مباشر. 
+                                    أستطيع عرض الجداول والمخططات التفاعلية مع تقديم تفسيرات دقيقة حسب <span class="font-bold text-accent-gold">نوع السجل</span>.
+                                </p>
+<div class="p-4 bg-surface-container-low rounded-xl border border-outline-variant/30 flex items-center gap-3">
+<span class="material-symbols-outlined text-primary">info</span>
+<p class="text-body-md text-body-md italic text-on-secondary-fixed-variant">
+                                        اختر صفتك أعلاه ثم اسألني عن أي مشروع أو مقارنة أو وضع مقاول.
+                                    </p>
+</div>
+</div>
+</div>
+</div>
+<div class="mt-8 flex justify-end">
+<span class="text-label-md text-on-surface-variant">01:50 ص</span>
+</div>
+</div>
+<!-- Initial Data Visualization (Empty State / Placeholder for dynamic content) -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<div class="bento-card bg-surface-container-low border border-outline-variant p-6 rounded-2xl h-48 flex flex-col justify-center items-center text-center gap-3 opacity-60">
+<span class="material-symbols-outlined text-[48px] text-on-surface-variant">bar_chart</span>
+<p class="text-body-md text-on-surface-variant">اسألني لعرض مخططات البيانات</p>
+</div>
+<div class="bento-card bg-surface-container-low border border-outline-variant p-6 rounded-2xl h-48 flex flex-col justify-center items-center text-center gap-3 opacity-60">
+<span class="material-symbols-outlined text-[48px] text-on-surface-variant">table_chart</span>
+<p class="text-body-md text-on-surface-variant">جداول المقارنة تظهر هنا</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Fixed Bottom Interaction Shell -->
+<footer class="absolute bottom-0 left-0 w-full p-8 bg-gradient-to-t from-background via-background to-transparent z-40">
+<div class="max-w-4xl mx-auto flex flex-col gap-4">
+<!-- Quick Actions Toolbar -->
+<div class="flex justify-center gap-2 overflow-x-auto pb-2 no-scrollbar">
+<button class="flex items-center gap-2 px-5 py-2.5 bg-surface-container-highest border border-outline-variant hover:bg-surface-variant rounded-full text-label-lg font-bold transition-all whitespace-nowrap">
+<span class="material-symbols-outlined text-[18px]">account_balance</span>
+                        إجمالي الشركة
+                    </button>
+<button class="flex items-center gap-2 px-5 py-2.5 bg-surface-container-highest border border-outline-variant hover:bg-surface-variant rounded-full text-label-lg font-bold transition-all whitespace-nowrap">
+<span class="material-symbols-outlined text-[18px]">description</span>
+                        تقرير 034
+                    </button>
+<button class="flex items-center gap-2 px-5 py-2.5 bg-surface-container-highest border border-outline-variant hover:bg-surface-variant rounded-full text-label-lg font-bold transition-all whitespace-nowrap">
+<span class="material-symbols-outlined text-[18px]">compare_arrows</span>
+                        مقارنة المشاريع
+                    </button>
+<button class="flex items-center gap-2 px-5 py-2.5 bg-surface-container-highest border border-outline-variant hover:bg-surface-variant rounded-full text-label-lg font-bold transition-all whitespace-nowrap">
+<span class="material-symbols-outlined text-[18px]">badge</span>
+                        وضع مقاول
+                    </button>
+<button class="flex items-center gap-2 px-5 py-2.5 bg-surface-container-highest border border-outline-variant hover:bg-surface-variant rounded-full text-label-lg font-bold transition-all whitespace-nowrap text-error">
+<span class="material-symbols-outlined text-[18px]">warning</span>
+                        مشاريع بلا إيراد
+                    </button>
+</div>
+<!-- Chat Input Area -->
+<div class="prompt-input bg-surface-container-lowest border border-outline shadow-xl rounded-[24px] p-2 flex items-end gap-2 group transition-all">
+<div class="flex-1 p-2">
+<textarea class="w-full bg-transparent border-none focus:ring-0 text-body-md resize-none py-2 px-4 placeholder:text-on-surface-variant/60" oninput="this.style.height = '';this.style.height = this.scrollHeight + 'px'" placeholder="اكتب سؤالك هنا... (مثلاً: ما هي المشاريع الأكثر ربحية في الربع الأخير؟)" rows="1"></textarea>
+</div>
+<div class="flex gap-2 p-2">
+<button class="p-3 text-on-surface-variant hover:bg-surface-variant rounded-full transition-colors" title="إرفاق ملف">
+<span class="material-symbols-outlined">attach_file</span>
+</button>
+<button class="p-3 bg-primary text-on-primary rounded-2xl flex items-center justify-center hover:opacity-90 active:scale-95 transition-all shadow-md group">
+<span class="material-symbols-outlined group-hover:-translate-y-1 group-hover:translate-x-1 transition-transform">send</span>
+</button>
+</div>
+</div>
+<p class="text-center text-[10px] text-on-surface-variant px-4">
+                    قد يرتكب الذكاء الاصطناعي بعض الأخطاء. يرجى مراجعة التقارير المالية النهائية.
+                </p>
+</div>
+</footer>
+</main>
+<!-- Interactions Script -->
+<script>
+        // Simple ripple-like effect on chips
+        document.querySelectorAll('button').forEach(button => {
+            button.addEventListener('mousedown', function(e) {
+                this.classList.add('scale-95');
+            });
+            button.addEventListener('mouseup', function(e) {
+                this.classList.remove('scale-95');
+            });
+            button.addEventListener('mouseleave', function(e) {
+                this.classList.remove('scale-95');
+            });
+        });
+
+        // Tab switching simulation (visual only)
+        const navLinks = document.querySelectorAll('aside nav a');
+        navLinks.forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                navLinks.forEach(l => {
+                    l.classList.remove('bg-secondary-container', 'text-on-secondary-container');
+                    l.classList.add('text-on-surface-variant');
+                });
+                link.classList.add('bg-secondary-container', 'text-on-secondary-container');
+                link.classList.remove('text-on-surface-variant');
+            });
+        });
+
+        // Role selection simulation
+        const roleButtons = document.querySelectorAll('.flex.flex-wrap.gap-3 button');
+        roleButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                roleButtons.forEach(b => {
+                    b.classList.remove('bg-primary', 'text-on-primary', 'shadow-md');
+                    b.classList.add('bg-surface-container-highest', 'text-on-surface');
+                });
+                btn.classList.add('bg-primary', 'text-on-primary', 'shadow-md');
+                btn.classList.remove('bg-surface-container-highest', 'text-on-surface');
+            });
+        });
+    </script>
+</body></html>
