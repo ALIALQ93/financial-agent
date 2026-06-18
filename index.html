@@ -39,7 +39,9 @@
     font-family: var(--font);
     background: var(--slate-100);
     color: var(--slate-900);
-    min-height: 100vh;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
   }
@@ -92,13 +94,15 @@
   /* ── Layout ── */
   .page {
     flex: 1;
+    min-height: 0;
     max-width: 920px;
     width: 100%;
     margin: 0 auto;
-    padding: 20px 20px 0;
+    padding: 16px 20px 0;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 12px;
+    overflow: hidden;
   }
 
   /* ── Role bar ── */
@@ -146,15 +150,18 @@
     border: 1px solid var(--slate-200);
     box-shadow: var(--shadow-sm);
     flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    min-height: 320px;
     overflow: hidden;
   }
 
   .chat-area {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
+    scroll-behavior: smooth;
     padding: 20px;
     display: flex;
     flex-direction: column;
@@ -233,10 +240,13 @@
     border-radius: var(--radius);
     border: 1px solid var(--slate-200);
     box-shadow: var(--shadow-sm);
-    padding: 16px;
+    padding: 12px 16px;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 10px;
+    flex-shrink: 0;
+    max-height: 28vh;
+    overflow-y: auto;
   }
 
   .quick-section label {
@@ -332,10 +342,9 @@
   .input-area {
     background: #fff;
     border-top: 1px solid var(--slate-200);
-    padding: 16px 20px 20px;
+    padding: 12px 20px 16px;
     box-shadow: 0 -4px 20px rgba(12, 18, 34, 0.04);
-    position: sticky;
-    bottom: 0;
+    flex-shrink: 0;
   }
 
   .input-row {
@@ -568,6 +577,34 @@
 <script>
 let currentRole = 'مدير عام';
 let isConfigured = false;
+let stickToBottom = true;
+
+const chatArea = document.getElementById('chatArea');
+
+function isNearBottom(threshold = 100) {
+  return chatArea.scrollHeight - chatArea.scrollTop - chatArea.clientHeight < threshold;
+}
+
+function scrollChatToBottom(behavior) {
+  requestAnimationFrame(() => {
+    chatArea.scrollTo({ top: chatArea.scrollHeight, behavior: behavior || 'smooth' });
+  });
+}
+
+function scrollChatSoon() {
+  scrollChatToBottom('smooth');
+  setTimeout(() => scrollChatToBottom('auto'), 80);
+  setTimeout(() => scrollChatToBottom('auto'), 350);
+  setTimeout(() => scrollChatToBottom('auto'), 800);
+}
+
+chatArea.addEventListener('scroll', () => {
+  stickToBottom = isNearBottom();
+}, { passive: true });
+
+new MutationObserver(() => {
+  if (stickToBottom) scrollChatToBottom('auto');
+}).observe(chatArea, { childList: true, subtree: true, characterData: true });
 
 document.getElementById('initTime').textContent = now();
 
@@ -618,6 +655,7 @@ function setRole(btn, role) {
 }
 
 function quickSend(text) {
+  stickToBottom = true;
   document.getElementById('msgInput').value = text;
   sendMsg();
 }
@@ -634,7 +672,7 @@ function addMsg(text, type) {
       '<div class="msg-time">' + now() + '</div>';
   }
   area.appendChild(div);
-  area.scrollTop = area.scrollHeight;
+  scrollChatSoon();
   return div;
 }
 
@@ -712,6 +750,9 @@ function renderChart(chart, container) {
       responsive: true,
       maintainAspectRatio: true,
       indexAxis: isHorizontal ? 'y' : 'x',
+      animation: {
+        onComplete: () => { if (stickToBottom) scrollChatToBottom('smooth'); },
+      },
       plugins: {
         legend: {
           position: 'bottom',
@@ -745,6 +786,7 @@ function renderAgentResponse(container, data) {
   time.className = 'msg-time';
   time.textContent = now();
   container.appendChild(time);
+  scrollChatSoon();
 }
 
 async function sendMsg() {
@@ -752,6 +794,7 @@ async function sendMsg() {
   const text = input.value.trim();
   if (!text) return;
 
+  stickToBottom = true;
   const fullMsg = 'أنا ' + currentRole + '. ' + text;
 
   input.value = '';
@@ -793,7 +836,7 @@ async function sendMsg() {
       '<div class="msg-time">' + now() + '</div>';
   } finally {
     document.getElementById('sendBtn').disabled = false;
-    document.getElementById('chatArea').scrollTop = 99999;
+    scrollChatSoon();
   }
 }
 </script>
