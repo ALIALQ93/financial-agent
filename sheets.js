@@ -1,4 +1,4 @@
-const { normalizeRecord, buildContext } = require('./analytics');
+const { normalizeRecord, buildContext, buildVisuals } = require('./analytics');
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const SHEET_GID = process.env.GOOGLE_SHEET_GID || '0';
@@ -71,14 +71,24 @@ function rowsToRecords(rows) {
   });
 }
 
-async function buildSheetContext(userMessage) {
-  if (!SHEET_ID) return '';
+async function buildSheetReport(userMessage) {
+  if (!SHEET_ID) return { context: '', tables: [], charts: [] };
 
   const rows = await fetchSheetRows();
   const records = rowsToRecords(rows);
-  if (!records.length) return '';
+  if (!records.length) return { context: '', tables: [], charts: [] };
 
-  return buildContext(records, userMessage);
+  const visuals = buildVisuals(records, userMessage);
+  return {
+    context: buildContext(records, userMessage),
+    tables: visuals.tables,
+    charts: visuals.charts,
+  };
+}
+
+async function buildSheetContext(userMessage) {
+  const report = await buildSheetReport(userMessage);
+  return report.context;
 }
 
 function isSheetConfigured() {
@@ -87,6 +97,7 @@ function isSheetConfigured() {
 
 module.exports = {
   buildSheetContext,
+  buildSheetReport,
   isSheetConfigured,
   fetchSheetRows,
 };

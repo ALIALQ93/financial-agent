@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const express = require('express');
 const path = require('path');
-const { buildSheetContext, isSheetConfigured } = require('./sheets');
+const { buildSheetReport, isSheetConfigured } = require('./sheets');
 const { SYSTEM_PROMPT } = require('./prompt');
 const { extractRole, cleanQuery } = require('./analytics');
 
@@ -22,30 +22,31 @@ const isConfigured = () => {
   return GROQ_API_KEY && GROQ_API_KEY !== 'YOUR_GROQ_API_KEY';
 };
 
-async function buildUserMessage(userMessage) {
+function cleanReply(text) {
+  return text
+    .replace(/\n*💡[\s\S]*$/g, '')
+    .replace(/\n*هل تريد[\s\S]*$/g, '')
+    .replace(/\n*يمكنني[\s\S]*$/g, '')
+    .trim();
+}
+
+async function buildUserMessage(userMessage, sheetContext) {
   const role = extractRole(userMessage);
   const query = cleanQuery(userMessage);
 
-  let sheetContext = '';
-  try {
-    sheetContext = await buildSheetContext(userMessage);
-  } catch (err) {
-    console.error('Sheet error:', err.message);
-    sheetContext = `[تنبيه: تعذّر تحميل Google Sheet — ${err.message}]`;
-  }
-
   let msg = '## البيانات المتاحة\n\n';
-  msg += sheetContext || 'لا تتوفر بيانات من Google Sheets.';
-  msg += '\n\n---\n\n';
+  msg += sheetContext || 'لا تتوفر بيانات.';
+  msg += '\n\n(الجداول والمخططات تُعرض في الواجهة — لا تكررها)\n\n---\n\n';
   msg += `## سؤال المستخدم\n`;
   if (role) msg += `الدور: ${role}\n`;
   msg += query;
+  msg += '\n\nاكتب تفسيراً مختصراً يركز على **نوع السجل** ومعنى الأرقام. بدون نصائح.';
 
   return msg;
 }
 
-async function chatWithGroq(message) {
-  const content = await buildUserMessage(message);
+async function chatWithGroq(message, sheetContext) {
+  const content = await buildUserMessage(message, sheetContext);
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -58,7 +59,8 @@ async function chatWithGroq(message) {
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content },
       ],
-      temperature: 0.2,
+      temperature: 0.1,
+      max_tokens: 600,
     }),
   });
 
@@ -67,11 +69,11 @@ async function chatWithGroq(message) {
 
   const reply = data.choices?.[0]?.message?.content;
   if (!reply) throw new Error('لم يُرجع النموذج إجابة');
-  return reply;
+  return cleanReply(reply);
 }
 
-async function chatWithGemini(message) {
-  const content = await buildUserMessage(message);
+async function chatWithGemini(message, sheetContext) {
+  const content = await buildUserMessage(message, sheetContext);
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
     {
@@ -89,7 +91,7 @@ async function chatWithGemini(message) {
 
   const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!reply) throw new Error('لم يُرجع النموذج إجابة');
-  return reply;
+  return cleanReply(reply);
 }
 
 app.use(express.json());
@@ -117,10 +119,16 @@ app.post('/api/chat', async (req, res) => {
   }
 
   try {
+    const report = await buildSheetReport(message);
     const reply = AI_PROVIDER === 'gemini'
-      ? await chatWithGemini(message)
-      : await chatWithGroq(message);
-    res.json({ reply });
+      ? await chatWithGemini(message, report.context)
+      : await chatWithGroq(message, report.context);
+
+    res.json({
+      reply,
+      tables: report.tables,
+      charts: report.charts,
+    });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }

@@ -14,6 +14,51 @@ function formatUSD(n, short = false) {
   return `${n.toLocaleString('en-US', { maximumFractionDigits: 0 })} USD`;
 }
 
+function formatLocalCurrency(rec) {
+  const val = Math.abs(rec.localValue || rec.net);
+  const formatted = val.toLocaleString('en-US', { maximumFractionDigits: 0 });
+  const cur = rec.currency || 'USD';
+  return `${formatted} ${cur}`;
+}
+
+const TYPE_LABELS = {
+  revenue: 'ايراد',
+  expense: 'المصاريف',
+  services: 'خدمات',
+  reservation: 'حجز',
+  contractor: 'مقاول/مورد',
+  auction: 'مزاد',
+  other: 'أخرى',
+};
+
+function interpretRecord(rec) {
+  const cls = classifyRecord(rec);
+  const net = rec.net;
+  const local = formatLocalCurrency(rec);
+  const typeName = rec.recordType || TYPE_LABELS[cls];
+
+  switch (cls) {
+    case 'revenue':
+      return `نوع: ${typeName} — إيراد ${formatUSD(Math.abs(net))} | بعملة المشروع: ${local}`;
+    case 'expense':
+      return `نوع: ${typeName} — مصروف ${formatUSD(net)} | بعملة المشروع: ${local}`;
+    case 'services':
+      return `نوع: ${typeName} — تكلفة خدمة ${formatUSD(net)} | بعملة المشروع: ${local}`;
+    case 'reservation':
+      return `نوع: ${typeName} — حجز ضمان ${formatUSD(net)} (منفصل عن الإيراد) | بعملة المشروع: ${local}`;
+    case 'contractor':
+      if (net > 0) return `نوع: ${typeName} — مستحق للمقاول ${formatUSD(net)} | بعملة المشروع: ${local}`;
+      if (net < 0) return `نوع: ${typeName} — دفعة مقدمة من الشركة ${formatUSD(Math.abs(net))} | بعملة المشروع: ${local}`;
+      return `نوع: ${typeName} — متوازن`;
+    case 'auction':
+      if (net < 0) return `نوع: ${typeName} — ربح فرق عملة ${formatUSD(Math.abs(net))}`;
+      if (net > 0) return `نوع: ${typeName} — خسارة فرق عملة ${formatUSD(net)}`;
+      return `نوع: ${typeName}`;
+    default:
+      return `نوع: ${typeName} — صافي ${formatUSD(net)} | بعملة المشروع: ${local}`;
+  }
+}
+
 function normalizeRecord(raw) {
   return {
     num: raw['#'],
@@ -251,8 +296,8 @@ function buildProjectReport(records, project) {
   }
 
   if (a.contractors.length) {
-    out += `**[ وضع المقاولين والموردين ]**\n`;
-    out += `| الجهة | المبلغ (USD) | الوضع |\n|-------|-------------|-------|\n`;
+    out += `**[ وضع المقاولين — نوع السجل: المقاوليين/المجهزيين ]**\n`;
+    out += `| الجهة | الصافي (USD) | الوضع |\n|-------|-------------|-------|\n`;
     for (const c of a.contractors) {
       out += `| ${c.name} | ${formatUSD(c.net)} | ${c.status} |\n`;
     }
@@ -260,14 +305,10 @@ function buildProjectReport(records, project) {
   }
 
   if (a.auctionProfit || a.auctionLoss) {
-    out += `**[ فرق العملة / المزاد ]**\n`;
-    if (a.auctionProfit) out += `- ربح فرق عملة: ${formatUSD(a.auctionProfit)}\n`;
-    if (a.auctionLoss) out += `- خسارة فرق عملة: ${formatUSD(a.auctionLoss)}\n`;
+    out += `**[ فرق العملة — نوع السجل: مزاد ]**\n`;
+    if (a.auctionProfit) out += `- ربح: ${formatUSD(a.auctionProfit)}\n`;
+    if (a.auctionLoss) out += `- خسارة: ${formatUSD(a.auctionLoss)}\n`;
     out += '\n';
-  }
-
-  if (a.alerts.length) {
-    out += `**[ 🚨 تنبيهات ]**\n${a.alerts.map(x => `- ${x}`).join('\n')}\n\n`;
   }
 
   return out;
@@ -400,6 +441,184 @@ function buildNoRevenueReport(records) {
   return out;
 }
 
+function buildDetailTable(records, title, limit = 50) {
+  const rows = records.slice(0, limit).map(r => [
+    r.recordType,
+    r.accountCode,
+    r.accountName.length > 40 ? r.accountName.slice(0, 40) + '…' : r.accountName,
+    formatUSD(r.net),
+    formatLocalCurrency(r),
+    r.currency,
+    interpretRecord(r).split(' | ')[0],
+  ]);
+
+  return {
+    title,
+    headers: ['نوع السجل', 'كود الحساب', 'اسم الحساب', 'الصافي (USD)', 'القيمة بعملة المشروع', 'العملة', 'المعنى'],
+    rows,
+  };
+}
+
+function buildVisuals(records, userMessage) {
+  const query = cleanQuery(userMessage);
+  const intent = detectIntent(query);
+  const projects = findMatchingProjects(records, query);
+  const tables = [];
+  const charts = [];
+
+  if (intent === 'company' || intent === 'general') {
+    const all = getAllProjects(records);
+    const rows = all.map(p => {
+      const a = analyzeProjectRecords(filterByProject(records, p));
+      return [p.name, formatUSD(a.revenue), formatUSD(a.totalCosts), formatUSD(a.profit),
+        a.margin !== null ? a.margin.toFixed(1) + '%' : '—'];
+    });
+
+    tables.push({
+      title: 'ملخص الشركة — حسب المشروع',
+      headers: ['المشروع', 'الإيراد (USD)', 'التكاليف (USD)', 'الربح (USD)', 'الهامش %'],
+      rows,
+    });
+
+    const top = all.map(p => ({
+      label: p.code || p.name.slice(0, 15),
+      revenue: analyzeProjectRecords(filterByProject(records, p)).revenue,
+      costs: analyzeProjectRecords(filterByProject(records, p)).totalCosts,
+    })).filter(x => x.revenue > 0).sort((a, b) => b.revenue - a.revenue).slice(0, 8);
+
+    if (top.length) {
+      charts.push({
+        type: 'bar',
+        title: 'الإيراد مقابل التكاليف — أبرز المشاريع',
+        labels: top.map(x => x.label),
+        datasets: [
+          { label: 'الإيراد', data: top.map(x => x.revenue), color: '#2e7d32' },
+          { label: 'التكاليف', data: top.map(x => x.costs), color: '#c62828' },
+        ],
+      });
+    }
+  }
+
+  if (intent === 'comparison') {
+    const all = getAllProjects(records);
+    const rows = all.map(p => {
+      const a = analyzeProjectRecords(filterByProject(records, p));
+      if (!a.hasRevenue) return null;
+      return [p.name, formatUSD(a.revenue), formatUSD(a.totalCosts), formatUSD(a.profit),
+        a.margin !== null ? a.margin.toFixed(1) + '%' : '—'];
+    }).filter(Boolean).sort((a, b) => parseFloat(b[4]) - parseFloat(a[4]));
+
+    rows.forEach((r, i) => r.unshift(String(i + 1)));
+
+    tables.push({
+      title: 'مقارنة المشاريع — حسب هامش الربح',
+      headers: ['#', 'المشروع', 'الإيراد', 'التكاليف', 'الربح', 'الهامش %'],
+      rows,
+    });
+
+    const sorted = all.map(p => ({
+      label: (p.code || p.name).slice(0, 18),
+      margin: analyzeProjectRecords(filterByProject(records, p)).margin,
+      hasRevenue: analyzeProjectRecords(filterByProject(records, p)).hasRevenue,
+    })).filter(x => x.hasRevenue && x.margin !== null).sort((a, b) => b.margin - a.margin);
+
+    if (sorted.length) {
+      charts.push({
+        type: 'bar',
+        title: 'هامش الربح % — المشاريع',
+        labels: sorted.map(x => x.label),
+        datasets: [{ label: 'الهامش %', data: sorted.map(x => +x.margin.toFixed(1)), color: '#e8b84b' }],
+        horizontal: true,
+      });
+    }
+  }
+
+  if (intent === 'project' && projects.length) {
+    const project = projects[0];
+    const filtered = filterByProject(records, project);
+    const a = analyzeProjectRecords(filtered);
+
+    tables.push({
+      title: `ملخص مشروع: ${project.name}`,
+      headers: ['البند', 'الصافي (USD)', 'نوع السجل / المعنى'],
+      rows: [
+        ['الإيراد الكلي', formatUSD(a.revenue), 'مجموع سجلات نوع: ايراد'],
+        ['الحجز لدى العميل', formatUSD(a.reservation), 'نوع: حجز — منفصل عن الإيراد'],
+        ['المستلم فعلاً', formatUSD(a.received), 'إيراد − حجز'],
+        ['إجمالي التكاليف', formatUSD(a.totalCosts), 'مصاريف + خدمات'],
+        ['الربح التقديري', formatUSD(a.profit), 'إيراد − تكاليف'],
+        ['هامش الربح', a.margin !== null ? a.margin.toFixed(1) + '%' : '—', '—'],
+      ],
+    });
+
+    if (a.expenseList.length) {
+      tables.push({
+        title: 'تفصيل التكاليف حسب المجموعة',
+        headers: ['المجموعة الرئيسية', 'الصافي (USD)', 'النسبة %'],
+        rows: a.expenseList.map(e => [e.group, formatUSD(e.amount), e.pct.toFixed(1) + '%']),
+      });
+
+      charts.push({
+        type: 'doughnut',
+        title: 'توزيع التكاليف',
+        labels: a.expenseList.slice(0, 8).map(e => e.group.slice(0, 20)),
+        datasets: [{ label: 'التكاليف', data: a.expenseList.slice(0, 8).map(e => e.amount) }],
+      });
+    }
+
+    if (a.contractors.length) {
+      tables.push({
+        title: 'وضع المقاولين والموردين',
+        headers: ['الجهة', 'الصافي (USD)', 'نوع السجل', 'الوضع'],
+        rows: a.contractors.map(c => [c.name, formatUSD(c.net), 'المقاوليين/المجهزيين', c.status]),
+      });
+    }
+
+    tables.push(buildDetailTable(filtered, 'سجلات المشروع التفصيلية', 40));
+  }
+
+  if (intent === 'contractor') {
+    const contractorRecs = records.filter(r => classifyRecord(r) === 'contractor');
+    const names = [...new Set(contractorRecs.map(r => r.accountName))];
+    const q = query.toLowerCase();
+    let matched = names;
+    if (!/كل|جميع/.test(q)) {
+      matched = names.filter(n => q.split(/\s+/).some(t => t.length > 2 && n.toLowerCase().includes(t)));
+      if (!matched.length) matched = names;
+    }
+
+    for (const name of matched.slice(0, 3)) {
+      const recs = contractorRecs.filter(r => r.accountName === name);
+      tables.push({
+        title: name,
+        headers: ['المشروع', 'الصافي (USD)', 'القيمة بعملة المشروع', 'الوضع'],
+        rows: recs.map(r => [
+          r.projectName,
+          formatUSD(r.net),
+          formatLocalCurrency(r),
+          r.net > 0 ? 'مستحق للمقاول' : r.net < 0 ? 'دفعة مقدمة' : 'متوازن',
+        ]),
+      });
+    }
+  }
+
+  if (intent === 'no_revenue') {
+    const list = getAllProjects(records).filter(p =>
+      !analyzeProjectRecords(filterByProject(records, p)).hasRevenue
+    );
+    tables.push({
+      title: 'مشاريع بلا إيراد مسجل',
+      headers: ['المشروع', 'كود المشروع', 'التكاليف (USD)', 'ملاحظة'],
+      rows: list.map(p => {
+        const a = analyzeProjectRecords(filterByProject(records, p));
+        return [p.name, p.code, formatUSD(a.totalCosts), 'لا يوجد سجل نوع: ايراد'];
+      }),
+    });
+  }
+
+  return { tables, charts };
+}
+
 function buildContext(records, userMessage) {
   const role = extractRole(userMessage);
   const query = cleanQuery(userMessage);
@@ -450,7 +669,16 @@ function buildContext(records, userMessage) {
 module.exports = {
   normalizeRecord,
   buildContext,
+  buildVisuals,
   extractRole,
   cleanQuery,
   detectIntent,
+  findMatchingProjects,
+  filterByProject,
+  analyzeProjectRecords,
+  getAllProjects,
+  interpretRecord,
+  formatUSD,
+  formatLocalCurrency,
+  classifyRecord,
 };

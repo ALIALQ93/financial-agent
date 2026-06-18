@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>المحلل المالي</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -99,6 +100,7 @@
     border: 1px solid #e0ddd6;
     align-self: flex-end;
     border-bottom-left-radius: 4px;
+    max-width: 95%;
   }
 
   .msg.agent.loading {
@@ -212,6 +214,60 @@
   }
   .config-box.hidden { display: none; }
 
+  .data-table-wrap {
+    overflow-x: auto;
+    margin: 12px 0;
+    border-radius: 8px;
+    border: 1px solid #e0ddd6;
+  }
+  .data-table-wrap h4 {
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 12px;
+    background: #f5f4f0;
+    border-bottom: 1px solid #e0ddd6;
+    color: #1a1a2e;
+  }
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .data-table th {
+    background: #1a1a2e;
+    color: #fff;
+    padding: 8px 10px;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .data-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid #eee;
+    text-align: right;
+  }
+  .data-table tr:nth-child(even) td { background: #fafaf8; }
+  .data-table tr:hover td { background: #fdf9ef; }
+
+  .chart-wrap {
+    margin: 14px 0;
+    padding: 12px;
+    background: #fafaf8;
+    border-radius: 8px;
+    border: 1px solid #e0ddd6;
+  }
+  .chart-wrap h4 {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 10px;
+    color: #1a1a2e;
+  }
+  .chart-canvas { max-height: 280px; }
+
+  .agent-text {
+    margin-bottom: 8px;
+    line-height: 1.7;
+  }
+
   @media(max-width:600px) {
     .chat-area { padding: 16px; }
     .msg { max-width: 95%; }
@@ -245,7 +301,7 @@
 
 <div class="chat-area" id="chatArea">
   <div class="msg agent">
-    مرحباً! أنا المحلل المالي. أقرأ بيانات الشركة من Google Sheets وأقدّم تحليلاً مفصلاً.
+    مرحباً! أنا المحلل المالي. أقرأ بيانات الشركة من Google Sheets وأعرض جداول ومخططات مع تفسير حسب **نوع السجل**.
     <br><br>
     اختر صفتك أعلاه ثم اسألني عن أي مشروع أو مقارنة أو وضع مقاول.
     <div class="msg-time" id="initTime"></div>
@@ -319,6 +375,94 @@ function escapeHtml(t) {
   return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+function renderTable(table) {
+  const wrap = document.createElement('div');
+  wrap.className = 'data-table-wrap';
+  wrap.innerHTML = '<h4>' + escapeHtml(table.title) + '</h4>';
+  const tbl = document.createElement('table');
+  tbl.className = 'data-table';
+  const thead = document.createElement('thead');
+  const hr = document.createElement('tr');
+  table.headers.forEach(h => {
+    const th = document.createElement('th');
+    th.textContent = h;
+    hr.appendChild(th);
+  });
+  thead.appendChild(hr);
+  tbl.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  table.rows.forEach(row => {
+    const tr = document.createElement('tr');
+    row.forEach(cell => {
+      const td = document.createElement('td');
+      td.textContent = cell;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  tbl.appendChild(tbody);
+  wrap.appendChild(tbl);
+  return wrap;
+}
+
+const CHART_COLORS = ['#1a1a2e','#e8b84b','#2e7d32','#c62828','#1565c0','#6a1b9a','#ef6c00','#00838f'];
+
+function renderChart(chart, container) {
+  const wrap = document.createElement('div');
+  wrap.className = 'chart-wrap';
+  wrap.innerHTML = '<h4>' + escapeHtml(chart.title) + '</h4>';
+  const canvas = document.createElement('canvas');
+  canvas.className = 'chart-canvas';
+  wrap.appendChild(canvas);
+  container.appendChild(wrap);
+
+  const isHorizontal = chart.horizontal;
+  const type = chart.type === 'doughnut' ? 'doughnut' : 'bar';
+
+  new Chart(canvas, {
+    type,
+    data: {
+      labels: chart.labels,
+      datasets: chart.datasets.map((ds, i) => ({
+        label: ds.label,
+        data: ds.data,
+        backgroundColor: ds.color || CHART_COLORS[i % CHART_COLORS.length],
+        borderRadius: 4,
+      })),
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      indexAxis: isHorizontal ? 'y' : 'x',
+      plugins: { legend: { position: 'bottom', rtl: true, labels: { font: { family: 'Segoe UI' } } } },
+      scales: type === 'bar' ? {
+        x: { ticks: { font: { size: 11 } } },
+        y: { ticks: { font: { size: 11 } } },
+      } : {},
+    },
+  });
+}
+
+function renderAgentResponse(container, data) {
+  container.className = 'msg agent';
+  container.innerHTML = '';
+
+  if (data.reply) {
+    const text = document.createElement('div');
+    text.className = 'agent-text';
+    text.innerHTML = escapeHtml(data.reply).replace(/\n/g, '<br>');
+    container.appendChild(text);
+  }
+
+  (data.tables || []).forEach(t => container.appendChild(renderTable(t)));
+  (data.charts || []).forEach(c => renderChart(c, container));
+
+  const time = document.createElement('div');
+  time.className = 'msg-time';
+  time.textContent = now();
+  container.appendChild(time);
+}
+
 async function sendMsg() {
   const input = document.getElementById('msgInput');
   const text = input.value.trim();
@@ -357,9 +501,7 @@ async function sendMsg() {
     const chatData = await chatRes.json();
     if (!chatRes.ok) throw new Error(chatData.error || 'فشل إرسال الرسالة');
 
-    loadDiv.className = 'msg agent';
-    loadDiv.innerHTML = escapeHtml(chatData.reply).replace(/\n/g,'<br>') +
-      '<div class="msg-time">' + now() + '</div>';
+    renderAgentResponse(loadDiv, chatData);
 
   } catch(e) {
     loadDiv.className = 'msg agent';
