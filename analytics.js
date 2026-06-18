@@ -130,13 +130,130 @@ function cleanQuery(message) {
     .trim();
 }
 
-function detectIntent(query) {
+const QUERY_STOP_WORDS = new Set([
+  'تقرير', 'مشروع', 'اعرض', 'عرض', 'حسب', 'عملة', 'ال', 'في', 'من', 'على', 'مع',
+  'و', 'او', 'أو', 'انا', 'أنا', 'مدير', 'عام', 'مالي', 'محاسب', 'بعملة', 'بالدولار',
+  'usd', 'iqd', 'الصافي', 'القيمه', 'القيمة', 'بين', 'جميع', 'كل', 'هذا', 'هذه', 'عن',
+  'اريد', 'أريد', 'اعطني', 'أعطني', 'كم', 'ما', 'هل', 'للمشروع', 'لشركة', 'الشركه', 'الشركة',
+]);
+
+/** مرادفات عربي ↔ إنجليزي — تُوسَّع تلقائياً من أسماء المشاريع */
+const CROSS_LANG_ALIASES = {
+  كربلاء: ['karbala', 'karbalaa', 'كربلا'],
+  karbala: ['كربلاء', 'كربلا'],
+  pip: ['karbala pip', 'كربلا pip'],
+  واحه: ['waha', 'al-waha', 'alwaha', 'oasis', 'الواحه', 'الواحة'],
+  waha: ['واحة', 'الواحة', 'al-waha'],
+  'al-waha': ['واحة', 'الواحة', 'waha'],
+  غراف: ['graph', 'algharaf', 'الغراف', 'al gharaf'],
+  algharaf: ['غراف', 'الغراف', 'graph'],
+  زيونه: ['zayona', 'zayouna', 'بناء زيونة', 'زيونة'],
+  فيلا: ['villa', 'فيلا العمارة', 'العمارة'],
+  chemical: ['كيميائي', 'مستودع', 'warehouse'],
+  warehouse: ['مستودع', 'chemical'],
+  power: ['باور', 'طاقة', 'كهرباء'],
+  diesel: ['ديزل'],
+  generator: ['مولد', 'مولدات'],
+  ohtl: ['خط', 'نقل', 'ترقية'],
+  upgrade: ['ترقية', 'تطوير', 'ohtl'],
+  fsf: ['fsf', 'epcc'],
+  epcc: ['fsf', 'epcc'],
+  lighting: ['اناره', 'إنارة', 'انارة'],
+  esp: ['esp', 'مضخة'],
+  pump: ['مضخة', 'pump'],
+  well: ['بئر', 'well', 'pad'],
+  pad: ['منصة', 'well pad'],
+  provision: ['توفير', 'provision'],
+  single: ['single', 'مصدر'],
+  source: ['مصدر', 'single'],
+  ebs: ['ebs'],
+  camp: ['مخيم', 'camp'],
+  station: ['محطة', 'station'],
+};
+
+function normalizeForSearch(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[\u064B-\u065F\u0670]/g, '')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
+    .replace(/[^\w\u0600-\u06FF\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function expandAliases(term) {
+  const aliases = new Set();
+  const n = normalizeForSearch(term);
+  if (!n) return [];
+  aliases.add(n);
+  if (CROSS_LANG_ALIASES[n]) {
+    CROSS_LANG_ALIASES[n].forEach(a => aliases.add(normalizeForSearch(a)));
+  }
+  for (const [key, vals] of Object.entries(CROSS_LANG_ALIASES)) {
+    const keyN = normalizeForSearch(key);
+    if (n === keyN || n.includes(keyN) || keyN.includes(n)) {
+      aliases.add(keyN);
+      vals.forEach(v => aliases.add(normalizeForSearch(v)));
+    }
+    for (const v of vals) {
+      const vN = normalizeForSearch(v);
+      if (n === vN || n.includes(vN) || vN.includes(n)) {
+        aliases.add(keyN);
+        aliases.add(vN);
+      }
+    }
+  }
+  return [...aliases];
+}
+
+function extractQueryTokens(query) {
+  let q = normalizeForSearch(cleanQuery(query));
+  q = q.replace(/^(انا\s+)?(مدير عام|مدير مالي|مدير مشروع|محاسب)\s*/g, '');
+  q = q.replace(/\b(تقرير|مشروع|اعرض|عرض|قارن|مقارنه|مقارنة|بين|جميع|كل|حسب|عمله|عملة|المشروع|الشركه|الشركة|للمشروع)\b/g, ' ');
+  return q.split(/\s+/).filter(t => t.length >= 2 && !QUERY_STOP_WORDS.has(t));
+}
+
+function buildProjectSearchTerms(project) {
+  const terms = new Set();
+  const addRaw = (s) => {
+    if (!s) return;
+    const n = normalizeForSearch(s);
+    if (n.length >= 2) terms.add(n);
+    expandAliases(n).forEach(a => terms.add(a));
+    n.split(/\s+/).forEach(t => {
+      if (t.length >= 2) {
+        terms.add(t);
+        expandAliases(t).forEach(a => terms.add(a));
+      }
+    });
+  };
+  addRaw(project.code);
+  addRaw(project.name);
+  String(project.name).split(/[\s\-_/،]+/).forEach(addRaw);
+  String(project.code).split(/[\s\-_/]+/).forEach(addRaw);
+  return [...terms];
+}
+
+function getProjectIndex(records) {
+  return getAllProjects(records).map(p => ({
+    ...p,
+    terms: buildProjectSearchTerms(p),
+  }));
+}
+
+function detectIntent(query, records) {
   const q = query.toLowerCase();
   if (/إجمالي|كاملاً|كاملا|الشركة|شركة|ملخص الشركة|تقرير الشركة/.test(q)) return 'company';
   if (/قارن|مقارنة|هامش|ترتيب|مقارنة بين/.test(q)) return 'comparison';
   if (/مقاول|مورد|مجهز/.test(q)) return 'contractor';
   if (/بلا إيراد|لا إيراد|بدون إيراد|لا تحتوي.*ايراد|مشاريع.*إيراد/.test(q)) return 'no_revenue';
-  if (/تقرير|مشروع|034|001|020|057|karbala|كربلاء|ohtl|واحة|غراف|زيونة/.test(q)) return 'project';
+  if (records) {
+    const matched = findMatchingProjects(records, query);
+    if (matched.length) return 'project';
+  }
+  if (/تقرير|مشروع/.test(q)) return 'project';
   return 'general';
 }
 
@@ -152,44 +269,108 @@ function getAllProjects(records) {
   return [...map.values()];
 }
 
-function scoreProjectMatch(project, query) {
-  const q = query.toLowerCase();
-  const name = (project.name || '').toLowerCase();
-  const code = (project.code || '').toLowerCase();
+function scoreProjectMatch(project, query, indexEntry) {
+  const tokens = extractQueryTokens(query);
+  const qNorm = normalizeForSearch(cleanQuery(query));
+  const nameN = normalizeForSearch(project.name);
+  const codeN = normalizeForSearch(project.code);
+  const terms = indexEntry?.terms || buildProjectSearchTerms(project);
   let score = 0;
 
-  const nums = q.match(/\d{2,4}/g) || [];
+  const nums = qNorm.match(/\d{2,4}/g) || [];
   for (const n of nums) {
-    if (code.includes(n) || name.includes(n)) score += 10;
+    if (codeN.includes(n) || nameN.includes(n)) score += 18;
   }
 
-  const keywords = [
-    ['ohtl', 'ohtl'], ['upgrade', 'upgrade'], ['034', '034'],
-    ['karbala', 'karbala'], ['كربلاء', 'karbala'], ['واحة', 'waha'], ['al-waha', 'waha'],
-    ['chemical', 'chemical'], ['fsf', 'fsf'], ['epcc', 'epcc'],
-    ['001', '001'], ['غراف', 'غراف'], ['زيونة', 'زيونة'],
-    ['single', 'single'], ['diesel', 'diesel'], ['057', '057'],
-    ['020', '020'], ['power', 'power'], ['pip', 'pip'],
-  ];
+  for (const token of tokens) {
+    const aliases = expandAliases(token);
+    for (const alias of aliases) {
+      if (alias.length < 2) continue;
+      if (nameN === alias || codeN === alias) score += 25;
+      else if (nameN.includes(alias) || codeN.includes(alias)) score += 14;
+      else if (alias.includes(nameN) && nameN.length >= 3) score += 12;
 
-  for (const [ar, en] of keywords) {
-    if (q.includes(ar) && (name.includes(en) || code.includes(en) || name.includes(ar))) {
-      score += 8;
+      for (const term of terms) {
+        if (term === alias) score += 22;
+        else if (term.includes(alias) || alias.includes(term)) {
+          score += Math.min(15, alias.length + 2);
+        }
+      }
     }
   }
 
-  if (q.includes(name) || name.includes(q.slice(0, 10))) score += 5;
-  if (code && q.includes(code)) score += 12;
+  if (codeN && qNorm.includes(codeN)) score += 16;
+  if (nameN.length >= 4 && qNorm.includes(nameN)) score += 14;
+
+  // تفضيل التطابق التام للاسم/الكود على التطابق الجزئي
+  for (const token of tokens) {
+    for (const alias of expandAliases(token)) {
+      if (nameN === alias || codeN === alias) score += 20;
+    }
+  }
 
   return score;
 }
 
 function findMatchingProjects(records, query) {
-  const projects = getAllProjects(records);
-  return projects
-    .map(p => ({ ...p, score: scoreProjectMatch(p, query) }))
+  const index = getProjectIndex(records);
+  let results = index
+    .map(entry => ({ ...entry, score: scoreProjectMatch(entry, query, entry) }))
     .filter(p => p.score > 0)
     .sort((a, b) => b.score - a.score);
+
+  if (!results.length) {
+    const tokens = extractQueryTokens(query);
+    if (tokens.length) {
+      results = index
+        .map(entry => {
+          let score = 0;
+          const nameN = normalizeForSearch(entry.name);
+          const codeN = normalizeForSearch(entry.code);
+          for (const token of tokens) {
+            for (const alias of expandAliases(token)) {
+              if (alias.length >= 3) {
+                if (nameN.startsWith(alias) || codeN.startsWith(alias)) score += 6;
+                if (nameN.includes(alias) || codeN.includes(alias)) score += 4;
+              }
+            }
+          }
+          return { ...entry, score };
+        })
+        .filter(p => p.score > 0)
+        .sort((a, b) => b.score - a.score);
+    }
+  }
+
+  return results.map(({ name, code, score }) => ({ name, code, score }));
+}
+
+function describeProjectMatch(project, query) {
+  const tokens = extractQueryTokens(query);
+  const nameN = normalizeForSearch(project.name);
+  const codeN = normalizeForSearch(project.code);
+  const hits = [];
+
+  for (const token of tokens) {
+    const aliases = expandAliases(token);
+    const matched = aliases.some(a =>
+      nameN.includes(a) || codeN.includes(a) ||
+      project.terms?.some(t => t === a || t.includes(a) || a.includes(t))
+    );
+    if (matched && !hits.includes(token)) hits.push(token);
+  }
+
+  if (!hits.length) return '';
+  const used = hits.join('، ');
+  const isArabicQuery = /[\u0600-\u06FF]/.test(used);
+  const isEnglishName = /^[a-z0-9\s\-]+$/i.test(project.name.trim());
+  if (isArabicQuery && isEnglishName) {
+    return `(تم التعرف على المشروع "${project.name}" من كلمتك "${used}")`;
+  }
+  if (!isArabicQuery && /[\u0600-\u06FF]/.test(project.name)) {
+    return `(تم التعرف على المشروع "${project.name}" من كلمتك "${used}")`;
+  }
+  return `(تم التعرف على المشروع من: ${used})`;
 }
 
 function filterByProject(records, project) {
@@ -537,7 +718,7 @@ function buildDetailTable(records, title, limit = 50) {
 
 function buildVisuals(records, userMessage) {
   const query = cleanQuery(userMessage);
-  const intent = detectIntent(query);
+  const intent = detectIntent(query, records);
   const projects = findMatchingProjects(records, query);
   const tables = [];
   const charts = [];
@@ -731,7 +912,7 @@ function buildVisuals(records, userMessage) {
 function buildContext(records, userMessage) {
   const role = extractRole(userMessage);
   const query = cleanQuery(userMessage);
-  const intent = detectIntent(query);
+  const intent = detectIntent(query, records);
   const projects = findMatchingProjects(records, query);
 
   let out = `تاريخ البيانات: من Google Sheets\n`;
@@ -754,15 +935,27 @@ function buildContext(records, userMessage) {
       break;
     case 'project':
       if (projects.length === 1) {
+        const matchNote = describeProjectMatch(
+          { ...projects[0], terms: buildProjectSearchTerms(projects[0]) },
+          query
+        );
+        if (matchNote) out += matchNote + '\n\n';
         out += buildProjectReport(records, projects[0]);
       } else if (projects.length > 1) {
-        out += `⚠️ وُجد أكثر من مشروع محتمل — اطلب التوضيح:\n`;
+        out += `⚠️ وُجد أكثر من مشروع محتمل — اختر الاسم أو الكود بدقة:\n`;
         projects.slice(0, 5).forEach(p => { out += `- ${p.name} (${p.code})\n`; });
+        const matchNote = describeProjectMatch(
+          { ...projects[0], terms: buildProjectSearchTerms(projects[0]) },
+          query
+        );
         out += '\n' + buildProjectReport(records, projects[0]);
-        out += `\n(التقرير أعلاه للمشروع الأقرب للسؤال: ${projects[0].name})\n`;
+        out += `\n(التقرير أعلاه للمشروع الأقرب للسؤال: ${projects[0].name})`;
+        if (matchNote) out += `\n${matchNote}`;
+        out += '\n';
       } else {
         out += buildCompanyReport(records);
-        out += '\n⚠️ لم يُحدد مشروع — يُعرض التقرير الإجمالي. المشاريع المتاحة:\n';
+        out += '\n⚠️ لم يُتعرف على المشروع من السؤال — يُعرض التقرير الإجمالي.\n';
+        out += 'المشاريع المتاحة (يمكنك كتابة الاسم بالعربي أو الإنجليزي أو الكود):\n';
         getAllProjects(records).forEach(p => { out += `- ${p.name} (${p.code})\n`; });
       }
       break;
@@ -784,6 +977,9 @@ module.exports = {
   cleanQuery,
   detectIntent,
   findMatchingProjects,
+  describeProjectMatch,
+  normalizeForSearch,
+  extractQueryTokens,
   filterByProject,
   analyzeProjectRecords,
   getAllProjects,
