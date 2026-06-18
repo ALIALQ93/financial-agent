@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      - name: التحقق من الأسرار
+        env:
+          TWIN_AGENT_ID: ${{ secrets.TWIN_AGENT_ID }}
+          TWIN_API_KEY: ${{ secrets.TWIN_API_KEY }}
+        run: |
+          node -e "
+            const id = process.env.TWIN_AGENT_ID;
+            const key = process.env.TWIN_API_KEY;
+            if (!id || id === 'YOUR_AGENT_ID') throw new Error('TWIN_AGENT_ID مفقود');
+            if (!key || key === 'YOUR_API_KEY') throw new Error('TWIN_API_KEY مفقود');
+            console.log('✓ الأسرار مُعدّة');
+          "
+
+      - name: اختبار الخادم
+        env:
+          TWIN_AGENT_ID: ${{ secrets.TWIN_AGENT_ID }}
+          TWIN_API_KEY: ${{ secrets.TWIN_API_KEY }}
+          PORT: 3000
+        run: |
+          npm start &
+          for i in $(seq 1 15); do
+            curl -sf http://localhost:3000/api/health && exit 0
+            sleep 1
+          done
+          echo "فشل تشغيل الخادم"
+          exit 1

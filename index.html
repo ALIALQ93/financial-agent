@@ -228,9 +228,9 @@
 </header>
 
 <div class="config-box" id="configBox">
-  ⚙️ لتشغيل هذه الصفحة: افتح الكود وضع <code>AGENT_ID</code> و<code>API_KEY</code> الخاصين بك من Twin.
+  ⚙️ لتشغيل التطبيق محلياً: انسخ <code>.env.example</code> إلى <code>.env</code> وضع <code>TWIN_AGENT_ID</code> و<code>TWIN_API_KEY</code> فيه، ثم شغّل <code>npm start</code>.
   <br><br>
-  <strong>الحصول على القيم:</strong> من Twin → Agent → Settings → API Key
+  <strong>على GitHub:</strong> أضف نفس القيم في Settings → Secrets → Actions
 </div>
 
 <div class="role-bar">
@@ -272,20 +272,20 @@
 </div>
 
 <script>
-// ============================================================
-// ضع قيمك هنا
-const AGENT_ID = '019ed6b6-32a0-7c67-b44e-3483c3bf74d5';
-const API_KEY  = 'twin_a11a5b626abfafa72cb122cdabaa27fa_qsFrrFBgad8nrVbcsbVSnwCUMF8_fAJwOWSzvSDK0HQ';
-const BASE_URL = 'https://build.twin.so';
-// ============================================================
-
 let currentRole = 'مدير عام';
-
-if (AGENT_ID !== 'YOUR_AGENT_ID') {
-  document.getElementById('configBox').classList.add('hidden');
-}
+let isConfigured = false;
 
 document.getElementById('initTime').textContent = now();
+
+fetch('/api/health')
+  .then(r => r.json())
+  .then(data => {
+    isConfigured = data.configured;
+    if (isConfigured) {
+      document.getElementById('configBox').classList.add('hidden');
+    }
+  })
+  .catch(() => {});
 
 function now() {
   return new Date().toLocaleTimeString('ar', {hour:'2-digit', minute:'2-digit'});
@@ -333,21 +333,28 @@ async function sendMsg() {
   const loadDiv = addMsg('جارٍ التحليل...', 'agent loading');
 
   try {
-    if (AGENT_ID === 'YOUR_AGENT_ID') {
-      await new Promise(r => setTimeout(r, 1500));
+    if (!isConfigured) {
+      const healthRes = await fetch('/api/health');
+      const healthData = await healthRes.json();
+      isConfigured = healthData.configured;
+    }
+
+    if (!isConfigured) {
       loadDiv.className = 'msg agent';
-      loadDiv.innerHTML = '⚠️ الرجاء إضافة AGENT_ID و API_KEY في كود الصفحة أولاً.' +
+      loadDiv.innerHTML = '⚠️ الرجاء إضافة TWIN_AGENT_ID و TWIN_API_KEY في ملف .env أو GitHub Secrets.' +
         '<div class="msg-time">' + now() + '</div>';
       return;
     }
 
-    const runRes = await fetch(BASE_URL + '/v1/agents/' + AGENT_ID + '/runs', {
+    const runRes = await fetch('/api/runs', {
       method: 'POST',
-      headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ run_mode: 'run', user_message: fullMsg })
     });
 
     const runData = await runRes.json();
+    if (!runRes.ok) throw new Error(runData.error || 'فشل بدء التشغيل');
+
     const runId = runData.run?.run_id;
     if (!runId) throw new Error('فشل بدء التشغيل');
 
@@ -369,11 +376,9 @@ async function sendMsg() {
 async function pollResult(runId) {
   for (let i = 0; i < 60; i++) {
     await new Promise(r => setTimeout(r, 3000));
-    const res = await fetch(
-      BASE_URL + '/v1/agents/' + AGENT_ID + '/runs/' + runId + '/events?limit=100',
-      { headers: { 'x-api-key': API_KEY } }
-    );
+    const res = await fetch('/api/runs/' + runId + '/events?limit=100');
     const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'فشل جلب النتيجة');
     const events = data.events || [];
     const finished = events.find(e => e.event?.finished || e.event?.stopped || e.event?.failed);
     if (finished) {

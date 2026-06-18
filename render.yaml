@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: financial-agent
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: TWIN_AGENT_ID
+        sync: false
+      - key: TWIN_API_KEY
+        sync: false
+      - key: BASE_URL
+        value: https://build.twin.so
