@@ -352,12 +352,324 @@ function detectRecordTypeQuery(query, records) {
   };
 }
 
+const EXPENSE_GENERIC_TERMS = new Set([
+  'مصاريف', 'مصروف', 'مصروفات', 'تكاليف', 'المصاريف', 'خدمات', 'الخدمات',
+  'مصروفات', 'مدفوع', 'مجموعه', 'مجموعة', 'بند', 'نوع', 'السجل', 'حساب',
+]);
+
+function getExpenseRecords(records) {
+  return records.filter(r => classifyRecord(r) === 'expense');
+}
+
+function getAllExpenseGroups(records) {
+  const map = new Map();
+  for (const r of getExpenseRecords(records)) {
+    const name = (r.group || '').trim();
+    if (!name) continue;
+    if (!map.has(name)) map.set(name, { name, recordCount: 0 });
+    map.get(name).recordCount++;
+  }
+  return [...map.values()];
+}
+
+function expenseGroupSpecificTokens(groupName) {
+  return normalizeForSearch(groupName)
+    .split(/\s+/)
+    .filter(t => t.length >= 2 && !EXPENSE_GENERIC_TERMS.has(t));
+}
+
+function scoreExpenseGroupMatch(groupName, query) {
+  const groupN = normalizeForSearch(groupName);
+  const qNorm = normalizeForSearch(cleanQuery(query));
+  const tokens = extractQueryTokens(query).filter(t => !EXPENSE_GENERIC_TERMS.has(t));
+  let score = 0;
+
+  if (groupN && qNorm.includes(groupN)) score += 55;
+
+  const groupTokens = expenseGroupSpecificTokens(groupName);
+  if (groupTokens.length) {
+    const matched = groupTokens.filter(t => qNorm.includes(t));
+    if (matched.length === groupTokens.length) score += 45;
+    else if (matched.length) score += matched.length * 16;
+  }
+
+  for (const token of tokens) {
+    if (token.length < 2) continue;
+    if (groupN === token) score += 28;
+    else if (groupN.includes(token)) score += token.length >= 3 ? 18 : 10;
+    else if (token.length >= 4 && groupN.split(/\s+/).some(w => w.startsWith(token) || w === token)) {
+      score += 14;
+    }
+  }
+
+  const phrase = tokens.filter(t => t.length >= 2).join(' ');
+  if (phrase.length >= 5 && groupN.includes(phrase)) score += 38;
+
+  return score;
+}
+
+function findMatchingExpenseGroups(records, query) {
+  return getAllExpenseGroups(records)
+    .map(g => ({ ...g, score: scoreExpenseGroupMatch(g.name, query) }))
+    .filter(g => g.score >= 12)
+    .sort((a, b) => b.score - a.score);
+}
+
+function scoreExpenseAccountMatch(accountName, query, groupName) {
+  const accN = normalizeForSearch(accountName);
+  const qNorm = normalizeForSearch(cleanQuery(query));
+  const tokens = extractQueryTokens(query).filter(t => !EXPENSE_GENERIC_TERMS.has(t));
+  let score = 0;
+
+  if (accN && qNorm.includes(accN)) score += 50;
+  for (const token of tokens) {
+    if (token.length >= 3 && accN.includes(token)) score += 15;
+  }
+  if (groupName && normalizeForSearch(groupName).split(/\s+/).some(t => accN.includes(t))) {
+    score -= 5;
+  }
+  return score;
+}
+
+function findMatchingExpenseAccounts(records, query, groupName, project = null) {
+  const groupNorm = normalizeForSearch(groupName);
+  let scoped = getExpenseRecords(records).filter(r => normalizeForSearch(r.group) === groupNorm);
+  if (project) scoped = filterByProject(scoped, project);
+  const groupN = normalizeForSearch(groupName);
+  const accounts = new Map();
+  for (const r of scoped) {
+    const name = (r.accountName || '').trim();
+    if (!name) continue;
+    if (!accounts.has(name)) accounts.set(name, { name, score: 0 });
+    accounts.get(name).score = Math.max(
+      accounts.get(name).score,
+      scoreExpenseAccountMatch(name, query, groupName)
+    );
+  }
+  return [...accounts.values()]
+    .filter(a => {
+      const accN = normalizeForSearch(a.name);
+      const qNorm = normalizeForSearch(cleanQuery(query));
+      if (accN.split(/\s+/).length === 1 && groupN.includes(accN)) return false;
+      return a.score >= 18 && accN.length >= 3 && qNorm.includes(accN);
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
+function filterByExpenseGroup(records, groupName) {
+  const target = normalizeForSearch(groupName);
+  return getExpenseRecords(records).filter(r => normalizeForSearch(r.group) === target);
+}
+
+function sumExpenseGroupRows(records, groupName, accountName = null) {
+  let filtered = filterByExpenseGroup(records, groupName);
+  if (accountName) {
+    const accTarget = normalizeForSearch(accountName);
+    filtered = filtered.filter(r => normalizeForSearch(r.accountName) === accTarget);
+  }
+  let netUsd = 0;
+  let netLocal = 0;
+  for (const r of filtered) {
+    netUsd += r.net;
+    netLocal += r.net >= 0 ? localVal(r) : -localVal(r);
+  }
+  return { filtered, count: filtered.length, netUsd, netLocal };
+}
+
+function detectExpenseGroupQuery(query, records) {
+  if (!records?.length) return null;
+
+  const matches = findMatchingExpenseGroups(records, query);
+  if (!matches.length) return null;
+
+  const top = matches[0];
+  const second = matches[1];
+  const specificTokens = extractQueryTokens(query).filter(t => !EXPENSE_GENERIC_TERMS.has(t));
+  const groupN = normalizeForSearch(top.name);
+  const qNorm = normalizeForSearch(cleanQuery(query));
+  const fullGroupInQuery = groupN.length >= 4 && qNorm.includes(groupN);
+  const groupSpecific = expenseGroupSpecificTokens(top.name);
+  const matchedSpecific = groupSpecific.filter(t => qNorm.includes(t));
+  const hasSpecificity = specificTokens.length > 0 && (
+    fullGroupInQuery ||
+    matchedSpecific.length >= 1 ||
+    top.score >= 20
+  );
+
+  if (!hasSpecificity) return null;
+
+  const scopeAll = /كل المشاريع|جميع المشاريع|لكل المشاريع|كل مشروع|على مستوى الشركة|مشاريع الشركة/.test(query);
+
+  let project = null;
+  let projectAmbiguous = false;
+  let projectCandidates = [];
+
+  if (records && !scopeAll) {
+    const res = resolveProjectQuery(records, query);
+    if (res.status === 'unique') project = res.project;
+    else if (res.status === 'ambiguous') {
+      projectAmbiguous = true;
+      projectCandidates = res.candidates;
+    }
+  }
+
+  const groupAmbiguous = Boolean(
+    second &&
+    top.score - second.score < 12 &&
+    second.score >= top.score * 0.75 &&
+    top.score < 50
+  );
+
+  const accountMatches = findMatchingExpenseAccounts(records, query, top.name, project);
+  const account = accountMatches[0] || null;
+
+  return {
+    group: top,
+    account,
+    project,
+    scopeAll: scopeAll || (!project && !projectAmbiguous),
+    groupAmbiguous,
+    groupCandidates: groupAmbiguous ? matches.slice(0, 5) : [],
+    projectAmbiguous,
+    projectCandidates,
+  };
+}
+
+function buildExpenseGroupDisambiguationTable(records, candidates) {
+  return {
+    title: 'مجموعات مصاريف متشابهة — يرجى التحديد',
+    headers: ['#', 'المجموعة (الحساب الاب)', 'عدد السجلات', 'إجمالي USD', 'تطابق السؤال'],
+    rows: candidates.map((g, i) => {
+      const s = sumExpenseGroupRows(records, g.name);
+      return [
+        String(i + 1),
+        g.name,
+        String(s.count),
+        formatUSD(s.netUsd),
+        i === 0 ? `الأقرب (درجة ${g.score})` : `متشابه (درجة ${g.score})`,
+      ];
+    }),
+  };
+}
+
+function buildExpenseGroupByProjectTable(records, groupName) {
+  const projects = getAllProjects(records);
+  const rows = projects.map(p => {
+    const scoped = filterByProject(records, p);
+    const s = sumExpenseGroupRows(scoped, groupName);
+    if (!s.count) return null;
+    const cur = dominantCurrency(scoped);
+    const a = analyzeProjectRecords(scoped);
+    const pct = a.totalCosts > 0 ? (s.netUsd / a.totalCosts) * 100 : 0;
+    return [
+      p.name,
+      p.code,
+      cur,
+      String(s.count),
+      formatUSD(s.netUsd),
+      formatLocalAmount(Math.abs(s.netLocal), cur),
+      pct.toFixed(1) + '%',
+    ];
+  }).filter(Boolean);
+
+  const total = sumExpenseGroupRows(records, groupName);
+  rows.push([
+    'الإجمالي',
+    '—',
+    'USD',
+    String(total.count),
+    formatUSD(total.netUsd),
+    '—',
+    '—',
+  ]);
+
+  return {
+    title: `مجموعة المصروف: ${groupName} — حسب المشروع`,
+    headers: ['المشروع', 'الكود', 'العملة', 'عدد السجلات', 'مجموع USD', 'مجموع محلي', '% من تكاليف المشروع'],
+    rows,
+  };
+}
+
+function buildExpenseGroupReport(records, expenseGroupQ) {
+  const { group, account, project, scopeAll, groupAmbiguous, groupCandidates, projectAmbiguous, projectCandidates } = expenseGroupQ;
+  let out = `## مجموعة المصروف: **${group.name}** — محسوب مسبقاً\n\n`;
+
+  if (groupAmbiguous) {
+    out += `⚠️ مجموعات متشابهة: ${groupCandidates.map(g => g.name).join(' | ')}\n`;
+    out += 'حدّد اسم المجموعة بدقة (مثل: مصاريف الفحص والاختبار).\n';
+    return out;
+  }
+
+  if (projectAmbiguous) {
+    out += `⚠️ مشاريع متشابهة: ${projectCandidates.map(p => p.name).join(' | ')}\n`;
+    out += 'حدّد المشروع بالكود أو الاسم الكامل.\n';
+    return out;
+  }
+
+  const scopeRecords = project ? filterByProject(records, project) : records;
+  const summary = sumExpenseGroupRows(scopeRecords, group.name, account?.name);
+  const scopeLabel = project
+    ? `مشروع: ${project.name} (${project.code})`
+    : 'كل المشاريع';
+  const cur = project ? dominantCurrency(scopeRecords) : 'USD';
+
+  out += `**النطاق:** ${scopeLabel}\n`;
+  out += `**المجموعة (الحساب الاب):** ${group.name}\n`;
+  if (account) out += `**الحساب الفرعي:** ${account.name}\n`;
+  out += `**عدد السجلات:** ${summary.count}\n`;
+  out += `**مجموع USD:** ${formatUSD(summary.netUsd)}\n`;
+  out += `**المعنى:** ${recordTypeMeaning('المصاريف', summary.netUsd)}\n\n`;
+
+  if (!summary.count) {
+    out += `⚠️ لا توجد سجلات في مجموعة "${group.name}"${project ? ` للمشروع ${project.name}` : ''}.\n`;
+    return out;
+  }
+
+  if (scopeAll && !project) {
+    out += `**[ ملخص حسب المشروع ]**\n`;
+    out += `| المشروع | عدد | USD | % من تكاليف المشروع |\n|---------|-----|-----|---------------------|\n`;
+    for (const p of getAllProjects(records)) {
+      const scoped = filterByProject(records, p);
+      const s = sumExpenseGroupRows(scoped, group.name, account?.name);
+      if (!s.count) continue;
+      const a = analyzeProjectRecords(scoped);
+      const pct = a.totalCosts > 0 ? ((s.netUsd / a.totalCosts) * 100).toFixed(1) : '—';
+      out += `| ${p.name} | ${s.count} | ${formatUSD(s.netUsd)} | ${pct}% |\n`;
+    }
+    out += '\n';
+  }
+
+  if (!account) {
+    const byAccount = new Map();
+    for (const r of summary.filtered) {
+      byAccount.set(r.accountName, (byAccount.get(r.accountName) || 0) + r.net);
+    }
+    if (byAccount.size > 1) {
+      out += `**[ حسب الحساب الفرعي ]**\n`;
+      for (const [name, net] of [...byAccount.entries()].sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))) {
+        out += `- ${name}: ${formatUSD(net)}\n`;
+      }
+      out += '\n';
+    }
+  }
+
+  if (project && summary.count) {
+    const a = analyzeProjectRecords(scopeRecords);
+    const pct = a.totalCosts > 0 ? ((summary.netUsd / a.totalCosts) * 100).toFixed(1) : '—';
+    out += `**نسبة من إجمالي تكاليف المشروع:** ${pct}%\n\n`;
+  }
+
+  return out;
+}
+
 function detectIntent(query, records) {
   const q = query.toLowerCase();
   if (/إجمالي|كاملاً|كاملا|الشركة|شركة|ملخص الشركة|تقرير الشركة/.test(q) && !detectRecordType(query)) {
     return 'company';
   }
   if (/قارن|مقارنة|هامش|ترتيب|مقارنة بين/.test(q) && !detectRecordType(query)) return 'comparison';
+  const expenseGroupQ = records?.length ? detectExpenseGroupQuery(query, records) : null;
+  if (expenseGroupQ?.group) return 'expense_group';
   const typeQ = detectRecordTypeQuery(query, records);
   if (typeQ?.type) return 'record_type';
   if (/مقاول|مورد|مجهز/.test(q)) return 'contractor';
@@ -1138,6 +1450,84 @@ function buildVisuals(records, userMessage) {
   const tables = [];
   const charts = [];
 
+  if (intent === 'expense_group') {
+    const expenseGroupQ = detectExpenseGroupQuery(query, records);
+    if (expenseGroupQ) {
+      if (expenseGroupQ.groupAmbiguous) {
+        tables.push(buildExpenseGroupDisambiguationTable(records, expenseGroupQ.groupCandidates));
+      } else if (expenseGroupQ.projectAmbiguous) {
+        tables.push(buildDisambiguationTable(records, expenseGroupQ.projectCandidates));
+      } else {
+        const { group, account, project, scopeAll } = expenseGroupQ;
+        const scopeRecords = project ? filterByProject(records, project) : records;
+        const summary = sumExpenseGroupRows(scopeRecords, group.name, account?.name);
+        const cur = project ? dominantCurrency(scopeRecords) : dominantCurrency(summary.filtered);
+
+        if (scopeAll && !project) {
+          tables.push(buildExpenseGroupByProjectTable(records, group.name));
+          const projects = getAllProjects(records);
+          const chartData = projects.map(p => {
+            const s = sumExpenseGroupRows(filterByProject(records, p), group.name, account?.name);
+            return { label: (p.code || p.name).slice(0, 16), value: s.netUsd, count: s.count };
+          }).filter(x => x.count > 0).sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+
+          if (chartData.length > 1) {
+            charts.push({
+              type: 'bar',
+              title: `${group.name} — حسب المشروع (USD)`,
+              labels: chartData.map(x => x.label),
+              datasets: [{ label: group.name, data: chartData.map(x => x.value), color: CHART_THEME.costs }],
+              horizontal: chartData.length > 6,
+            });
+          }
+        }
+
+        const titleSuffix = project ? project.name : 'كل المشاريع';
+        tables.push({
+          title: `${group.name}${account ? ` — ${account.name}` : ''} — ${titleSuffix}`,
+          headers: ['البند', 'القيمة'],
+          rows: [
+            ['المجموعة (الحساب الاب)', group.name],
+            ...(account ? [['الحساب الفرعي', account.name]] : []),
+            ['عدد السجلات', String(summary.count)],
+            ['مجموع USD', formatUSD(summary.netUsd)],
+            ['مجموع محلي', formatLocalAmount(Math.abs(summary.netLocal), cur)],
+            ['المعنى', recordTypeMeaning('المصاريف', summary.netUsd)],
+            ...(project && summary.count ? (() => {
+              const a = analyzeProjectRecords(scopeRecords);
+              const pct = a.totalCosts > 0 ? ((summary.netUsd / a.totalCosts) * 100).toFixed(1) : '—';
+              return [['% من تكاليف المشروع', pct + '%']];
+            })() : []),
+          ],
+        });
+
+        if (!account && summary.filtered.length) {
+          const byAccount = new Map();
+          for (const r of summary.filtered) {
+            byAccount.set(r.accountName, (byAccount.get(r.accountName) || 0) + r.net);
+          }
+          if (byAccount.size > 1) {
+            tables.push({
+              title: `${group.name} — حسب الحساب الفرعي`,
+              headers: ['الحساب', 'الصافي USD', 'المعنى'],
+              rows: [...byAccount.entries()]
+                .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+                .map(([name, net]) => [name, formatUSD(net), recordTypeMeaning('المصاريف', net)]),
+            });
+          }
+        }
+
+        if (summary.filtered.length) {
+          tables.push(buildDetailTable(
+            summary.filtered,
+            `سجلات ${group.name}${project ? ` — ${project.name}` : ''}`,
+            80
+          ));
+        }
+      }
+    }
+  }
+
   if (intent === 'company' || intent === 'general') {
     const all = getAllProjects(records);
     const rows = all.map(p => {
@@ -1401,8 +1791,12 @@ function buildContext(records, userMessage) {
   let out = `تاريخ البيانات: من Google Sheets\n`;
   out += `عدد السجلات: ${records.length} | عدد المشاريع: ${getAllProjects(records).length}\n`;
   if (role) out += `دور المستخدم المحدد: **${role}**\n`;
-  const typeQ = detectRecordTypeQuery(query, records);
-  if (typeQ) out += `نوع السجل المطلوب: **${typeQ.label}**\n`;
+  const expenseGroupQ = detectExpenseGroupQuery(query, records);
+  if (expenseGroupQ?.group) out += `مجموعة المصروف: **${expenseGroupQ.group.name}**\n`;
+  else {
+    const typeQ = detectRecordTypeQuery(query, records);
+    if (typeQ) out += `نوع السجل المطلوب: **${typeQ.label}**\n`;
+  }
   out += `نوع السؤال المكتشف: ${intent}\n\n`;
 
   switch (intent) {
@@ -1418,6 +1812,11 @@ function buildContext(records, userMessage) {
     case 'no_revenue':
       out += buildNoRevenueReport(records);
       break;
+    case 'expense_group': {
+      const egQ = detectExpenseGroupQuery(query, records);
+      if (egQ) out += buildExpenseGroupReport(records, egQ);
+      break;
+    }
     case 'record_type': {
       const typeQuery = detectRecordTypeQuery(query, records);
       if (typeQuery) out += buildRecordTypeReport(records, typeQuery, query);
@@ -1468,7 +1867,11 @@ module.exports = {
   detectIntent,
   detectRecordType,
   detectRecordTypeQuery,
+  detectExpenseGroupQuery,
   filterByRecordType,
+  filterByExpenseGroup,
+  findMatchingExpenseGroups,
+  sumExpenseGroupRows,
   findMatchingProjects,
   resolveProjectQuery,
   describeProjectMatch,
