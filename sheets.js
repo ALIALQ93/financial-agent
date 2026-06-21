@@ -1,4 +1,4 @@
-const { normalizeRecord, buildContext, buildVisuals, getProjectsForUI } = require('./analytics');
+const { normalizeRecord, buildContext, buildVisuals, getProjectsForUI, getExpenseGroupsForUI, getExpenseAccountsForUI } = require('./analytics');
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const SHEET_GID = process.env.GOOGLE_SHEET_GID || '0';
@@ -102,10 +102,26 @@ async function listProjects() {
   return getProjectsForUI(records);
 }
 
+async function listExpenseGroups({ projectCode, projectName } = {}) {
+  if (!SHEET_ID) return [];
+  const rows = await fetchSheetRows();
+  const records = rowsToRecords(rows);
+  return getExpenseGroupsForUI(records, { projectCode, projectName });
+}
+
+async function listExpenseAccounts({ projectCode, projectName, groupName } = {}) {
+  if (!SHEET_ID) return [];
+  const rows = await fetchSheetRows();
+  const records = rowsToRecords(rows);
+  return getExpenseAccountsForUI(records, { projectCode, projectName, groupName });
+}
+
 module.exports = {
   buildSheetContext,
   buildSheetReport,
   listProjects,
+  listExpenseGroups,
+  listExpenseAccounts,
   isSheetConfigured,
   fetchSheetRows,
 };

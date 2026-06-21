@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const express = require('express');
 const path = require('path');
-const { buildSheetReport, listProjects, isSheetConfigured } = require('./sheets');
+const { buildSheetReport, listProjects, listExpenseGroups, listExpenseAccounts, isSheetConfigured } = require('./sheets');
 const { SYSTEM_PROMPT } = require('./prompt');
 const { extractRole, cleanQuery } = require('./analytics');
 
@@ -109,6 +109,33 @@ app.get('/api/projects', async (_req, res) => {
   try {
     const projects = await listProjects();
     res.json({ projects });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.get('/api/expense-groups', async (req, res) => {
+  try {
+    const { projectCode, projectName } = req.query;
+    const groups = await listExpenseGroups({
+      projectCode: projectCode || undefined,
+      projectName: projectName || undefined,
+    });
+    res.json({ groups });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.get('/api/expense-accounts', async (req, res) => {
+  try {
+    const { projectCode, projectName, groupName } = req.query;
+    const accounts = await listExpenseAccounts({
+      projectCode: projectCode || undefined,
+      projectName: projectName || undefined,
+      groupName: groupName || undefined,
+    });
+    res.json({ accounts });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }

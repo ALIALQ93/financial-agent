@@ -1326,6 +1326,56 @@ function getProjectsForUI(records) {
   });
 }
 
+function scopeExpenseRecords(records, { projectCode, projectName, groupName } = {}) {
+  let scoped = getExpenseRecords(records);
+  if (groupName) scoped = filterByExpenseGroup(scoped, groupName);
+  if (projectCode || projectName) {
+    scoped = scoped.filter(r =>
+      (projectCode && r.projectCode === projectCode) ||
+      (projectName && r.projectName === projectName)
+    );
+  }
+  return scoped;
+}
+
+function getExpenseGroupsForUI(records, { projectCode, projectName } = {}) {
+  const scoped = scopeExpenseRecords(records, { projectCode, projectName });
+  const map = new Map();
+  for (const r of scoped) {
+    const name = (r.group || '').trim();
+    if (!name) continue;
+    if (!map.has(name)) map.set(name, { name, totalUsd: 0, count: 0 });
+    const g = map.get(name);
+    g.totalUsd += r.net;
+    g.count++;
+  }
+  return [...map.values()]
+    .sort((a, b) => Math.abs(b.totalUsd) - Math.abs(a.totalUsd));
+}
+
+function getExpenseAccountsForUI(records, { projectCode, projectName, groupName } = {}) {
+  const scoped = scopeExpenseRecords(records, { projectCode, projectName, groupName });
+  const map = new Map();
+  for (const r of scoped) {
+    const name = (r.accountName || '').trim();
+    if (!name) continue;
+    const key = groupName ? name : `${r.group}::${name}`;
+    if (!map.has(key)) {
+      map.set(key, {
+        name,
+        group: r.group || '',
+        totalUsd: 0,
+        count: 0,
+      });
+    }
+    const a = map.get(key);
+    a.totalUsd += r.net;
+    a.count++;
+  }
+  return [...map.values()]
+    .sort((a, b) => Math.abs(b.totalUsd) - Math.abs(a.totalUsd));
+}
+
 function projectSummaryRows(a) {
   return [
     ['الإيراد الكلي', formatUSD(a.revenue), formatLocalAmount(a.revenueLocal, a.currency), 'نوع: ايراد'],
@@ -1862,6 +1912,8 @@ module.exports = {
   buildContext,
   buildVisuals,
   getProjectsForUI,
+  getExpenseGroupsForUI,
+  getExpenseAccountsForUI,
   extractRole,
   cleanQuery,
   detectIntent,

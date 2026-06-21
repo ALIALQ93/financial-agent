@@ -98,4 +98,16 @@ describe('expense group detection', () => {
     const { tables } = buildVisuals(records, q);
     assert.ok(tables.some(t => t.title.includes('حسب المشروع')));
   });
+
+  it('lists expense groups and accounts for UI', () => {
+    const { getExpenseGroupsForUI, getExpenseAccountsForUI } = require('./analytics');
+    const groups = getExpenseGroupsForUI(records);
+    assert.ok(groups.some(g => g.name === 'مصاريف الفحص والاختبار'));
+    const accounts = getExpenseAccountsForUI(records, {
+      groupName: 'مصاريف الفحص والاختبار',
+      projectName: 'Karbala PIP',
+    });
+    assert.equal(accounts.length, 2);
+    assert.equal(accounts.reduce((s, a) => s + a.totalUsd, 0), 20800);
+  });
 });

@@ -198,6 +198,98 @@
     color: #fff;
   }
 
+  .filter-field { margin-bottom: 10px; }
+  .filter-field label {
+    display: block;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--slate-500);
+    margin-bottom: 4px;
+  }
+  .filter-hint {
+    font-size: 10px;
+    color: var(--slate-500);
+    margin-bottom: 8px;
+    line-height: 1.4;
+  }
+  .filter-hint strong { color: var(--navy-800); font-weight: 600; }
+  .combo-wrap { position: relative; }
+  .combo-wrap input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--slate-200);
+    border-radius: 8px;
+    font-size: 12px;
+    font-family: inherit;
+    background: var(--slate-50);
+    outline: none;
+    direction: rtl;
+  }
+  .combo-wrap input:focus {
+    border-color: var(--gold-500);
+    background: #fff;
+    box-shadow: 0 0 0 2px var(--gold-glow);
+  }
+  .combo-wrap input:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    background: var(--slate-100);
+  }
+  .combo-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 300;
+    max-height: 220px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid var(--slate-200);
+    border-radius: 8px;
+    box-shadow: var(--shadow-md);
+  }
+  .combo-dropdown.hidden { display: none; }
+  .combo-item {
+    padding: 8px 12px;
+    font-size: 11px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--slate-100);
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    text-align: right;
+  }
+  .combo-item:last-child { border-bottom: none; }
+  .combo-item:hover { background: #fffdf5; }
+  .combo-item.selected { background: rgba(212, 168, 83, 0.14); }
+  .combo-item .combo-label {
+    flex: 1;
+    min-width: 0;
+    line-height: 1.35;
+    color: var(--navy-800);
+    font-weight: 500;
+  }
+  .combo-item .combo-meta {
+    flex-shrink: 0;
+    font-size: 10px;
+    color: var(--slate-500);
+    white-space: nowrap;
+  }
+  .combo-empty {
+    padding: 10px 12px;
+    font-size: 11px;
+    color: var(--slate-500);
+    text-align: center;
+  }
+  .filter-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .filter-actions .quick-btn { width: 100%; }
+
   .project-search {
     width: 100%;
     padding: 8px 12px;
@@ -263,6 +355,11 @@
     flex-shrink: 0;
   }
   .quick-btn.project .cur.iqd { background: #7c3aed; }
+  .quick-btn.project.selected {
+    border-color: var(--gold-500);
+    background: #fffdf5;
+    box-shadow: inset 0 0 0 1px rgba(212, 168, 83, 0.35);
+  }
 
   /* ── Main panel ── */
   .main-panel {
@@ -658,6 +755,28 @@
         <button class="quick-btn action" onclick="quickSend('تقرير الشركة الإجمالي: الإيرادات، التكاليف، والحجوزات')">ملخص الشركة</button>
       </div>
     </div>
+    <div class="sidebar-section">
+      <div class="section-title">الحسابات</div>
+      <p class="filter-hint" id="accountFilterHint">اختر مشروعاً من القائمة أو اتركه ليشمل <strong>كل المشاريع</strong></p>
+      <div class="filter-field">
+        <label for="groupSearch">الحساب الاب</label>
+        <div class="combo-wrap" id="groupCombo">
+          <input type="search" id="groupSearch" placeholder="بحث أو اختيار مجموعة..." autocomplete="off">
+          <div class="combo-dropdown hidden" id="groupDropdown"></div>
+        </div>
+      </div>
+      <div class="filter-field">
+        <label for="accountSearch">الحساب الفرعي</label>
+        <div class="combo-wrap" id="accountCombo">
+          <input type="search" id="accountSearch" placeholder="اختر الحساب الاب أولاً..." autocomplete="off" disabled>
+          <div class="combo-dropdown hidden" id="accountDropdown"></div>
+        </div>
+      </div>
+      <div class="filter-actions">
+        <button class="quick-btn action" id="accountQueryBtn" onclick="sendAccountQuery()" disabled>عرض المصروف</button>
+        <button class="quick-btn" type="button" onclick="clearAccountFilters()">مسح التصفية</button>
+      </div>
+    </div>
     <div class="sidebar-section grow">
       <div class="section-title">المشاريع</div>
       <input type="search" class="project-search" id="projectSearch" placeholder="بحث عن مشروع..." oninput="filterProjects()">
@@ -699,6 +818,11 @@ let currentRole = 'مدير عام';
 let isConfigured = false;
 let stickToBottom = true;
 let allProjects = [];
+let allGroups = [];
+let allAccounts = [];
+let selectedProject = null;
+let selectedGroup = null;
+let selectedAccount = null;
 
 const chatArea = document.getElementById('chatArea');
 
@@ -747,9 +871,246 @@ fetch('/api/health')
     if (isConfigured) {
       document.getElementById('configBox').classList.add('hidden');
       loadProjectButtons();
+      loadExpenseGroups();
+      initAccountCombos();
     }
   })
   .catch(() => {});
+
+function fmtUsdShort(n) {
+  const v = Math.round(Math.abs(Number(n) || 0));
+  return v.toLocaleString('en-US') + ' USD';
+}
+
+function projectQueryParams() {
+  const params = new URLSearchParams();
+  if (selectedProject?.code) params.set('projectCode', selectedProject.code);
+  if (selectedProject?.name) params.set('projectName', selectedProject.name);
+  return params;
+}
+
+function updateAccountFilterHint() {
+  const el = document.getElementById('accountFilterHint');
+  if (!el) return;
+  if (selectedProject) {
+    el.innerHTML = 'المشروع المحدد: <strong>' + escapeHtml(selectedProject.name) + '</strong>';
+  } else {
+    el.innerHTML = 'اختر مشروعاً من القائمة أو اتركه ليشمل <strong>كل المشاريع</strong>';
+  }
+}
+
+function updateAccountQueryBtn() {
+  const btn = document.getElementById('accountQueryBtn');
+  if (btn) btn.disabled = !selectedGroup;
+}
+
+function loadExpenseGroups() {
+  const params = projectQueryParams();
+  fetch('/api/expense-groups' + (params.toString() ? '?' + params : ''))
+    .then(r => r.json())
+    .then(data => {
+      allGroups = data.groups || [];
+      renderGroupDropdown(document.getElementById('groupSearch')?.value || '');
+    })
+    .catch(() => {
+      allGroups = [];
+      renderGroupDropdown('');
+    });
+}
+
+function loadExpenseAccounts() {
+  if (!selectedGroup) {
+    allAccounts = [];
+    renderAccountDropdown('');
+    return;
+  }
+  const params = projectQueryParams();
+  params.set('groupName', selectedGroup.name);
+  fetch('/api/expense-accounts?' + params)
+    .then(r => r.json())
+    .then(data => {
+      allAccounts = data.accounts || [];
+      renderAccountDropdown(document.getElementById('accountSearch')?.value || '');
+    })
+    .catch(() => {
+      allAccounts = [];
+      renderAccountDropdown('');
+    });
+}
+
+function selectProject(project, btnEl) {
+  selectedProject = project;
+  document.querySelectorAll('.quick-btn.project').forEach(b => b.classList.remove('selected'));
+  if (btnEl) btnEl.classList.add('selected');
+  updateAccountFilterHint();
+  clearGroupSelection(false);
+  loadExpenseGroups();
+}
+
+function clearProjectSelection() {
+  selectedProject = null;
+  document.querySelectorAll('.quick-btn.project').forEach(b => b.classList.remove('selected'));
+  updateAccountFilterHint();
+  loadExpenseGroups();
+}
+
+function clearGroupSelection(reloadAccounts) {
+  selectedGroup = null;
+  const groupInput = document.getElementById('groupSearch');
+  if (groupInput) groupInput.value = '';
+  clearAccountSelection(false);
+  hideDropdown('groupDropdown');
+  if (reloadAccounts !== false) loadExpenseAccounts();
+  updateAccountQueryBtn();
+}
+
+function clearAccountSelection(reloadList) {
+  selectedAccount = null;
+  const accountInput = document.getElementById('accountSearch');
+  if (accountInput) {
+    accountInput.value = '';
+    accountInput.disabled = !selectedGroup;
+    accountInput.placeholder = selectedGroup
+      ? 'بحث أو اختيار حساب فرعي...'
+      : 'اختر الحساب الاب أولاً...';
+  }
+  hideDropdown('accountDropdown');
+  if (reloadList !== false && selectedGroup) loadExpenseAccounts();
+  updateAccountQueryBtn();
+}
+
+function clearAccountFilters() {
+  clearProjectSelection();
+  clearGroupSelection();
+}
+
+function hideDropdown(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.add('hidden');
+}
+
+function renderGroupDropdown(query) {
+  const dropdown = document.getElementById('groupDropdown');
+  if (!dropdown) return;
+  const q = (query || '').trim().toLowerCase();
+  const items = q
+    ? allGroups.filter(g => g.name.toLowerCase().includes(q))
+    : allGroups;
+
+  dropdown.innerHTML = '';
+  if (!items.length) {
+    dropdown.innerHTML = '<div class="combo-empty">' + (q ? 'لا توجد نتائج' : 'لا توجد مجموعات') + '</div>';
+  } else {
+    items.slice(0, 80).forEach(g => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'combo-item' + (selectedGroup?.name === g.name ? ' selected' : '');
+      item.innerHTML =
+        '<span class="combo-label">' + escapeHtml(g.name) + '</span>' +
+        '<span class="combo-meta">' + fmtUsdShort(g.totalUsd) + '</span>';
+      item.onclick = () => selectGroup(g);
+      dropdown.appendChild(item);
+    });
+  }
+  dropdown.classList.remove('hidden');
+}
+
+function renderAccountDropdown(query) {
+  const dropdown = document.getElementById('accountDropdown');
+  const accountInput = document.getElementById('accountSearch');
+  if (!dropdown || !accountInput) return;
+
+  if (!selectedGroup) {
+    dropdown.classList.add('hidden');
+    return;
+  }
+
+  const q = (query || '').trim().toLowerCase();
+  const items = q
+    ? allAccounts.filter(a => a.name.toLowerCase().includes(q))
+    : allAccounts;
+
+  dropdown.innerHTML = '';
+  if (!items.length) {
+    dropdown.innerHTML = '<div class="combo-empty">' + (q ? 'لا توجد نتائج' : 'لا توجد حسابات') + '</div>';
+  } else {
+    items.slice(0, 80).forEach(a => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'combo-item' + (selectedAccount?.name === a.name ? ' selected' : '');
+      item.innerHTML =
+        '<span class="combo-label">' + escapeHtml(a.name) + '</span>' +
+        '<span class="combo-meta">' + fmtUsdShort(a.totalUsd) + '</span>';
+      item.onclick = () => selectAccount(a);
+      dropdown.appendChild(item);
+    });
+  }
+  dropdown.classList.remove('hidden');
+}
+
+function selectGroup(group) {
+  selectedGroup = group;
+  document.getElementById('groupSearch').value = group.name;
+  hideDropdown('groupDropdown');
+  clearAccountSelection(false);
+  const accountInput = document.getElementById('accountSearch');
+  accountInput.disabled = false;
+  accountInput.placeholder = 'بحث أو اختيار حساب فرعي...';
+  loadExpenseAccounts();
+  updateAccountQueryBtn();
+}
+
+function selectAccount(account) {
+  selectedAccount = account;
+  document.getElementById('accountSearch').value = account.name;
+  hideDropdown('accountDropdown');
+  updateAccountQueryBtn();
+}
+
+function initAccountCombos() {
+  const groupInput = document.getElementById('groupSearch');
+  const accountInput = document.getElementById('accountSearch');
+
+  groupInput.addEventListener('focus', () => renderGroupDropdown(groupInput.value));
+  groupInput.addEventListener('input', () => {
+    selectedGroup = null;
+    selectedAccount = null;
+    accountInput.value = '';
+    accountInput.disabled = true;
+    accountInput.placeholder = 'اختر الحساب الاب أولاً...';
+    allAccounts = [];
+    updateAccountQueryBtn();
+    renderGroupDropdown(groupInput.value);
+  });
+
+  accountInput.addEventListener('focus', () => {
+    if (selectedGroup) renderAccountDropdown(accountInput.value);
+  });
+  accountInput.addEventListener('input', () => {
+    selectedAccount = null;
+    updateAccountQueryBtn();
+    renderAccountDropdown(accountInput.value);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!document.getElementById('groupCombo')?.contains(e.target)) hideDropdown('groupDropdown');
+    if (!document.getElementById('accountCombo')?.contains(e.target)) hideDropdown('accountDropdown');
+  });
+}
+
+function sendAccountQuery() {
+  const groupName = selectedGroup?.name || document.getElementById('groupSearch').value.trim();
+  if (!groupName) return;
+
+  let text = groupName;
+  const accountName = selectedAccount?.name || document.getElementById('accountSearch').value.trim();
+  if (accountName) text += ' — ' + accountName;
+  if (selectedProject) text += ' — مشروع ' + selectedProject.name;
+  else text += ' — كل المشاريع';
+
+  document.getElementById('sidebar').classList.remove('open');
+  quickSend(text);
+}
 
 function loadProjectButtons() {
   fetch('/api/projects')
@@ -785,6 +1146,7 @@ function renderProjectList(projects) {
       '<span class="' + curClass + '">' + escapeHtml(p.currency) + '</span>';
     btn.title = p.name;
     btn.onclick = () => {
+      selectProject(p, btn);
       document.getElementById('sidebar').classList.remove('open');
       quickSend('تقرير مشروع ' + p.name + ' — اعرض الصافي USD والقيمة بعملة المشروع (' + p.currency + ')');
     };
