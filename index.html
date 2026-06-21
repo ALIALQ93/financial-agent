@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
   :root {
     --navy-900: #0c1222;
@@ -213,6 +214,8 @@
     line-height: 1.4;
   }
   .filter-hint strong { color: var(--navy-800); font-weight: 600; }
+  .filter-hint.required { color: #92400e; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 8px 10px; }
+  .filter-hint.ready { color: var(--slate-500); background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 8px 10px; }
   .combo-wrap { position: relative; }
   .combo-wrap input {
     width: 100%;
@@ -359,6 +362,24 @@
     border-color: var(--gold-500);
     background: #fffdf5;
     box-shadow: inset 0 0 0 1px rgba(212, 168, 83, 0.35);
+  }
+  .quick-btn.project .proj-report {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--slate-200);
+    background: var(--navy-800);
+    color: #fff;
+    flex-shrink: 0;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all .2s;
+  }
+  .quick-btn.project .proj-report:hover {
+    background: var(--gold-500);
+    color: var(--navy-900);
+    border-color: var(--gold-500);
   }
 
   /* ── Main panel ── */
@@ -643,6 +664,208 @@
     font-size: 13px;
   }
 
+  .msg-actions {
+    display: flex;
+    justify-content: flex-start;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--slate-200);
+  }
+  .pdf-export-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--slate-200);
+    background: #fff;
+    color: var(--navy-800);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .pdf-export-btn:hover {
+    border-color: var(--gold-500);
+    background: #fffdf5;
+    color: var(--navy-900);
+  }
+  .pdf-export-btn:disabled {
+    opacity: 0.6;
+    cursor: wait;
+  }
+  .pdf-export-btn svg { flex-shrink: 0; }
+
+  /* ── PDF print sheet (off-screen) ── */
+  .pdf-sheet {
+    width: 210mm;
+    background: #fff;
+    font-family: 'IBM Plex Sans Arabic', 'Segoe UI', Tahoma, sans-serif;
+    direction: rtl;
+    color: #0f172a;
+    box-sizing: border-box;
+  }
+  .pdf-sheet * { box-sizing: border-box; }
+  .pdf-sheet-inner {
+    padding: 14mm 16mm 18mm;
+  }
+  .pdf-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 10px;
+    margin-bottom: 14px;
+    border-bottom: 3px solid #d4a853;
+  }
+  .pdf-brand h1 {
+    font-size: 20px;
+    font-weight: 700;
+    color: #141d33;
+    margin: 0 0 4px;
+    letter-spacing: -0.02em;
+  }
+  .pdf-brand p {
+    margin: 0;
+    font-size: 11px;
+    color: #64748b;
+  }
+  .pdf-logo {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #d4a853, #e8c468);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .pdf-meta {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 16px;
+    font-size: 11px;
+    line-height: 1.7;
+  }
+  .pdf-meta-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .pdf-meta-label {
+    font-weight: 700;
+    color: #475569;
+    min-width: 72px;
+  }
+  .pdf-meta-value { color: #0f172a; flex: 1; }
+  .pdf-section {
+    margin-bottom: 18px;
+    page-break-inside: avoid;
+  }
+  .pdf-section-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #141d33;
+    margin: 0 0 10px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #e2e8f0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pdf-section-title::before {
+    content: '';
+    width: 4px;
+    height: 14px;
+    background: #d4a853;
+    border-radius: 2px;
+  }
+  .pdf-text {
+    font-size: 12px;
+    line-height: 1.85;
+    color: #334155;
+    text-align: justify;
+  }
+  .pdf-table-block {
+    margin-bottom: 16px;
+    page-break-inside: auto;
+  }
+  .pdf-table-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    background: linear-gradient(135deg, #141d33, #1a2744);
+    padding: 8px 12px;
+    border-radius: 8px 8px 0 0;
+    margin: 0;
+  }
+  .pdf-table-wrap {
+    border: 1px solid #e2e8f0;
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    overflow: hidden;
+  }
+  .pdf-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9px;
+    table-layout: fixed;
+  }
+  .pdf-table th {
+    background: #243352;
+    color: rgba(255,255,255,0.95);
+    padding: 7px 8px;
+    text-align: right;
+    font-weight: 600;
+    word-wrap: break-word;
+  }
+  .pdf-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #f1f5f9;
+    text-align: right;
+    color: #334155;
+    word-wrap: break-word;
+    vertical-align: top;
+  }
+  .pdf-table tr:nth-child(even) td { background: #f8fafc; }
+  .pdf-table tr:last-child td { border-bottom: none; }
+  .pdf-chart-block {
+    margin-bottom: 16px;
+    page-break-inside: avoid;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px;
+    background: #fff;
+  }
+  .pdf-chart-block h3 {
+    font-size: 11px;
+    font-weight: 700;
+    color: #141d33;
+    margin: 0 0 10px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #d4a853;
+    display: inline-block;
+  }
+  .pdf-chart-block img {
+    display: block;
+    width: 100%;
+    max-height: 90mm;
+    object-fit: contain;
+  }
+  .pdf-page-break { page-break-before: always; height: 0; }
+  .pdf-footer {
+    margin-top: 20px;
+    padding-top: 10px;
+    border-top: 1px solid #e2e8f0;
+    font-size: 9px;
+    color: #94a3b8;
+    text-align: center;
+  }
+
   .sidebar-toggle {
     display: none;
     background: rgba(255,255,255,0.1);
@@ -755,13 +978,20 @@
         <button class="quick-btn action" onclick="quickSend('تقرير الشركة الإجمالي: الإيرادات، التكاليف، والحجوزات')">ملخص الشركة</button>
       </div>
     </div>
+    <div class="sidebar-section grow">
+      <div class="section-title">المشاريع <span style="font-weight:400;color:var(--slate-500)">— اختر للحسابات</span></div>
+      <input type="search" class="project-search" id="projectSearch" placeholder="بحث عن مشروع..." oninput="filterProjects()">
+      <div class="project-list" id="projectBtns">
+        <span class="projects-loading">جاري تحميل المشاريع</span>
+      </div>
+    </div>
     <div class="sidebar-section">
       <div class="section-title">الحسابات</div>
-      <p class="filter-hint" id="accountFilterHint">اختر مشروعاً من القائمة أو اتركه ليشمل <strong>كل المشاريع</strong></p>
+      <p class="filter-hint required" id="accountFilterHint">يجب <strong>اختيار مشروع</strong> من القائمة أعلاه أولاً</p>
       <div class="filter-field">
         <label for="groupSearch">الحساب الاب</label>
         <div class="combo-wrap" id="groupCombo">
-          <input type="search" id="groupSearch" placeholder="بحث أو اختيار مجموعة..." autocomplete="off">
+          <input type="search" id="groupSearch" placeholder="اختر مشروعاً أولاً..." autocomplete="off" disabled>
           <div class="combo-dropdown hidden" id="groupDropdown"></div>
         </div>
       </div>
@@ -774,14 +1004,7 @@
       </div>
       <div class="filter-actions">
         <button class="quick-btn action" id="accountQueryBtn" onclick="sendAccountQuery()" disabled>عرض المصروف</button>
-        <button class="quick-btn" type="button" onclick="clearAccountFilters()">مسح التصفية</button>
-      </div>
-    </div>
-    <div class="sidebar-section grow">
-      <div class="section-title">المشاريع</div>
-      <input type="search" class="project-search" id="projectSearch" placeholder="بحث عن مشروع..." oninput="filterProjects()">
-      <div class="project-list" id="projectBtns">
-        <span class="projects-loading">جاري تحميل المشاريع</span>
+        <button class="quick-btn" type="button" onclick="clearAccountFilters()">مسح الحسابات</button>
       </div>
     </div>
   </aside>
@@ -871,8 +1094,8 @@ fetch('/api/health')
     if (isConfigured) {
       document.getElementById('configBox').classList.add('hidden');
       loadProjectButtons();
-      loadExpenseGroups();
       initAccountCombos();
+      updateAccountControlsState();
     }
   })
   .catch(() => {});
@@ -893,18 +1116,58 @@ function updateAccountFilterHint() {
   const el = document.getElementById('accountFilterHint');
   if (!el) return;
   if (selectedProject) {
-    el.innerHTML = 'المشروع المحدد: <strong>' + escapeHtml(selectedProject.name) + '</strong>';
+    el.className = 'filter-hint ready';
+    el.innerHTML = 'المشروع المحدد: <strong>' + escapeHtml(selectedProject.name) + '</strong>' +
+      (selectedProject.code ? ' <span style="opacity:.75">(' + escapeHtml(selectedProject.code) + ')</span>' : '');
   } else {
-    el.innerHTML = 'اختر مشروعاً من القائمة أو اتركه ليشمل <strong>كل المشاريع</strong>';
+    el.className = 'filter-hint required';
+    el.innerHTML = 'يجب <strong>اختيار مشروع</strong> من القائمة أعلاه أولاً';
   }
 }
 
 function updateAccountQueryBtn() {
   const btn = document.getElementById('accountQueryBtn');
-  if (btn) btn.disabled = !selectedGroup;
+  if (btn) btn.disabled = !selectedProject || !selectedGroup;
+}
+
+function updateAccountControlsState() {
+  const groupInput = document.getElementById('groupSearch');
+  const accountInput = document.getElementById('accountSearch');
+  const hasProject = Boolean(selectedProject);
+
+  updateAccountFilterHint();
+
+  if (groupInput) {
+    groupInput.disabled = !hasProject;
+    groupInput.placeholder = hasProject
+      ? 'بحث أو اختيار مجموعة...'
+      : 'اختر مشروعاً أولاً...';
+  }
+
+  if (!hasProject) {
+    allGroups = [];
+    hideDropdown('groupDropdown');
+    clearGroupSelection(false);
+  }
+
+  if (accountInput) {
+    const canPickAccount = hasProject && selectedGroup;
+    accountInput.disabled = !canPickAccount;
+    accountInput.placeholder = !hasProject
+      ? 'اختر مشروعاً أولاً...'
+      : !selectedGroup
+        ? 'اختر الحساب الاب أولاً...'
+        : 'بحث أو اختيار حساب فرعي... (اختياري)';
+  }
+
+  updateAccountQueryBtn();
 }
 
 function loadExpenseGroups() {
+  if (!selectedProject) {
+    allGroups = [];
+    return;
+  }
   const params = projectQueryParams();
   fetch('/api/expense-groups' + (params.toString() ? '?' + params : ''))
     .then(r => r.json())
@@ -919,7 +1182,7 @@ function loadExpenseGroups() {
 }
 
 function loadExpenseAccounts() {
-  if (!selectedGroup) {
+  if (!selectedProject || !selectedGroup) {
     allAccounts = [];
     renderAccountDropdown('');
     return;
@@ -942,16 +1205,17 @@ function selectProject(project, btnEl) {
   selectedProject = project;
   document.querySelectorAll('.quick-btn.project').forEach(b => b.classList.remove('selected'));
   if (btnEl) btnEl.classList.add('selected');
-  updateAccountFilterHint();
   clearGroupSelection(false);
+  updateAccountControlsState();
   loadExpenseGroups();
 }
 
 function clearProjectSelection() {
   selectedProject = null;
   document.querySelectorAll('.quick-btn.project').forEach(b => b.classList.remove('selected'));
-  updateAccountFilterHint();
-  loadExpenseGroups();
+  allGroups = [];
+  allAccounts = [];
+  updateAccountControlsState();
 }
 
 function clearGroupSelection(reloadAccounts) {
@@ -961,27 +1225,21 @@ function clearGroupSelection(reloadAccounts) {
   clearAccountSelection(false);
   hideDropdown('groupDropdown');
   if (reloadAccounts !== false) loadExpenseAccounts();
-  updateAccountQueryBtn();
+  updateAccountControlsState();
 }
 
 function clearAccountSelection(reloadList) {
   selectedAccount = null;
   const accountInput = document.getElementById('accountSearch');
-  if (accountInput) {
-    accountInput.value = '';
-    accountInput.disabled = !selectedGroup;
-    accountInput.placeholder = selectedGroup
-      ? 'بحث أو اختيار حساب فرعي...'
-      : 'اختر الحساب الاب أولاً...';
-  }
+  if (accountInput) accountInput.value = '';
   hideDropdown('accountDropdown');
   if (reloadList !== false && selectedGroup) loadExpenseAccounts();
-  updateAccountQueryBtn();
+  updateAccountControlsState();
 }
 
 function clearAccountFilters() {
-  clearProjectSelection();
   clearGroupSelection();
+  updateAccountControlsState();
 }
 
 function hideDropdown(id) {
@@ -992,6 +1250,11 @@ function hideDropdown(id) {
 function renderGroupDropdown(query) {
   const dropdown = document.getElementById('groupDropdown');
   if (!dropdown) return;
+  if (!selectedProject) {
+    dropdown.innerHTML = '<div class="combo-empty">اختر مشروعاً من القائمة أعلاه</div>';
+    dropdown.classList.remove('hidden');
+    return;
+  }
   const q = (query || '').trim().toLowerCase();
   const items = q
     ? allGroups.filter(g => g.name.toLowerCase().includes(q))
@@ -1053,33 +1316,32 @@ function selectGroup(group) {
   document.getElementById('groupSearch').value = group.name;
   hideDropdown('groupDropdown');
   clearAccountSelection(false);
-  const accountInput = document.getElementById('accountSearch');
-  accountInput.disabled = false;
-  accountInput.placeholder = 'بحث أو اختيار حساب فرعي...';
   loadExpenseAccounts();
-  updateAccountQueryBtn();
+  updateAccountControlsState();
 }
 
 function selectAccount(account) {
   selectedAccount = account;
   document.getElementById('accountSearch').value = account.name;
   hideDropdown('accountDropdown');
-  updateAccountQueryBtn();
+  updateAccountControlsState();
 }
 
 function initAccountCombos() {
   const groupInput = document.getElementById('groupSearch');
   const accountInput = document.getElementById('accountSearch');
 
-  groupInput.addEventListener('focus', () => renderGroupDropdown(groupInput.value));
+  groupInput.addEventListener('focus', () => {
+    if (selectedProject) renderGroupDropdown(groupInput.value);
+    else renderGroupDropdown('');
+  });
   groupInput.addEventListener('input', () => {
+    if (!selectedProject) return;
     selectedGroup = null;
     selectedAccount = null;
     accountInput.value = '';
-    accountInput.disabled = true;
-    accountInput.placeholder = 'اختر الحساب الاب أولاً...';
     allAccounts = [];
-    updateAccountQueryBtn();
+    updateAccountControlsState();
     renderGroupDropdown(groupInput.value);
   });
 
@@ -1088,7 +1350,7 @@ function initAccountCombos() {
   });
   accountInput.addEventListener('input', () => {
     selectedAccount = null;
-    updateAccountQueryBtn();
+    updateAccountControlsState();
     renderAccountDropdown(accountInput.value);
   });
 
@@ -1099,14 +1361,14 @@ function initAccountCombos() {
 }
 
 function sendAccountQuery() {
+  if (!selectedProject) return;
   const groupName = selectedGroup?.name || document.getElementById('groupSearch').value.trim();
   if (!groupName) return;
 
   let text = groupName;
   const accountName = selectedAccount?.name || document.getElementById('accountSearch').value.trim();
   if (accountName) text += ' — ' + accountName;
-  if (selectedProject) text += ' — مشروع ' + selectedProject.name;
-  else text += ' — كل المشاريع';
+  text += ' — مشروع ' + selectedProject.name;
 
   document.getElementById('sidebar').classList.remove('open');
   quickSend(text);
@@ -1133,8 +1395,10 @@ function renderProjectList(projects) {
     return;
   }
   projects.forEach(p => {
-    const btn = document.createElement('button');
+    const btn = document.createElement('div');
     btn.className = 'quick-btn project';
+    btn.setAttribute('role', 'button');
+    btn.tabIndex = 0;
     btn.dataset.name = (p.name + ' ' + p.code).toLowerCase();
     const curClass = p.currency === 'IQD' ? 'cur iqd' : 'cur';
     const shortName = p.name.length > 28 ? p.name.slice(0, 28) + '…' : p.name;
@@ -1143,12 +1407,24 @@ function renderProjectList(projects) {
         '<span class="proj-name">' + escapeHtml(shortName) + '</span>' +
         '<span class="proj-code">' + escapeHtml(p.code || '') + '</span>' +
       '</div>' +
+      '<span class="proj-report" role="button" tabindex="0" title="تقرير المشروع">تقرير</span>' +
       '<span class="' + curClass + '">' + escapeHtml(p.currency) + '</span>';
-    btn.title = p.name;
-    btn.onclick = () => {
+    btn.title = p.name + ' — انقر للتحديد للحسابات';
+    btn.onclick = (e) => {
+      if (e.target.closest('.proj-report')) {
+        e.stopPropagation();
+        selectProject(p, btn);
+        document.getElementById('sidebar').classList.remove('open');
+        quickSend('تقرير مشروع ' + p.name + ' — اعرض الصافي USD والقيمة بعملة المشروع (' + p.currency + ')');
+        return;
+      }
       selectProject(p, btn);
-      document.getElementById('sidebar').classList.remove('open');
-      quickSend('تقرير مشروع ' + p.name + ' — اعرض الصافي USD والقيمة بعملة المشروع (' + p.currency + ')');
+    };
+    btn.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        selectProject(p, btn);
+      }
     };
     box.appendChild(btn);
   });
@@ -1280,7 +1556,7 @@ function renderChart(chart, container) {
   });
 }
 
-function renderAgentResponse(container, data) {
+function renderAgentResponse(container, data, userQuestion) {
   container.className = 'msg agent';
   container.innerHTML = '';
 
@@ -1303,11 +1579,192 @@ function renderAgentResponse(container, data) {
     charts.forEach(c => renderChart(c, container));
   }
 
+  const hasExportable = Boolean(
+    data.reply ||
+    (data.tables && data.tables.length) ||
+    (data.charts && data.charts.length)
+  );
+
+  if (hasExportable) {
+    container._exportPayload = {
+      data,
+      userQuestion: userQuestion || '',
+      role: currentRole,
+      timestamp: new Date().toISOString(),
+    };
+
+    const actions = document.createElement('div');
+    actions.className = 'msg-actions';
+    actions.innerHTML =
+      '<button type="button" class="pdf-export-btn" onclick="exportResultToPdf(this)" aria-label="تصدير PDF">' +
+        '<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">' +
+          '<path d="M12 3v12M7 10l5 5 5-5M5 21h14" stroke-linecap="round" stroke-linejoin="round"/>' +
+        '</svg>' +
+        'تصدير PDF' +
+      '</button>';
+    container.appendChild(actions);
+  }
+
   const time = document.createElement('div');
   time.className = 'msg-time';
   time.textContent = now();
   container.appendChild(time);
   scrollChatSoon();
+}
+
+function formatPdfDate(iso) {
+  try {
+    return new Date(iso).toLocaleString('ar-IQ', {
+      dateStyle: 'long',
+      timeStyle: 'short',
+    });
+  } catch {
+    return new Date().toLocaleString('ar');
+  }
+}
+
+function buildPdfFilename(payload) {
+  const date = new Date(payload.timestamp || Date.now());
+  const stamp = date.toISOString().slice(0, 16).replace(/[-:T]/g, '');
+  const slug = (payload.userQuestion || 'تقرير')
+    .replace(/[^\w\u0600-\u06FF\s-]/g, '')
+    .trim()
+    .slice(0, 40)
+    .replace(/\s+/g, '-');
+  return 'المحلل-المالي-' + (slug || 'تقرير') + '-' + stamp + '.pdf';
+}
+
+function buildPdfTableHtml(table) {
+  let html = '<div class="pdf-table-block">';
+  html += '<h3 class="pdf-table-title">' + escapeHtml(table.title || 'جدول') + '</h3>';
+  html += '<div class="pdf-table-wrap"><table class="pdf-table"><thead><tr>';
+  (table.headers || []).forEach(h => {
+    html += '<th>' + escapeHtml(String(h)) + '</th>';
+  });
+  html += '</tr></thead><tbody>';
+  (table.rows || []).forEach(row => {
+    html += '<tr>';
+    row.forEach(cell => {
+      html += '<td>' + escapeHtml(String(cell ?? '')) + '</td>';
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table></div></div>';
+  return html;
+}
+
+function captureChartsFromMessage(container) {
+  return [...container.querySelectorAll('.chart-wrap')].map(wrap => ({
+    title: wrap.querySelector('h4')?.textContent || 'مخطط',
+    dataUrl: wrap.querySelector('canvas')?.toDataURL('image/png', 1.0) || null,
+  })).filter(c => c.dataUrl);
+}
+
+function buildPdfSheet(payload, chartImages) {
+  const { data, userQuestion, role, timestamp } = payload;
+  const sheet = document.createElement('div');
+  sheet.className = 'pdf-sheet';
+
+  let body = '';
+
+  if (data.reply) {
+    body += '<div class="pdf-section">' +
+      '<h2 class="pdf-section-title">التفسير والتحليل</h2>' +
+      '<div class="pdf-text">' + escapeHtml(data.reply).replace(/\n/g, '<br>') + '</div>' +
+      '</div>';
+  }
+
+  if (data.tables && data.tables.length) {
+    body += '<div class="pdf-section"><h2 class="pdf-section-title">الجداول</h2>';
+    data.tables.forEach((t, i) => {
+      if (i > 0 && i % 2 === 0) body += '<div class="pdf-page-break"></div>';
+      body += buildPdfTableHtml(t);
+    });
+    body += '</div>';
+  }
+
+  if (chartImages.length) {
+    body += '<div class="pdf-section"><h2 class="pdf-section-title">المخططات</h2>';
+    chartImages.forEach((chart, i) => {
+      if (i > 0) body += '<div class="pdf-page-break"></div>';
+      body += '<div class="pdf-chart-block">' +
+        '<h3>' + escapeHtml(chart.title) + '</h3>' +
+        '<img src="' + chart.dataUrl + '" alt="' + escapeHtml(chart.title) + '">' +
+        '</div>';
+    });
+    body += '</div>';
+  }
+
+  sheet.innerHTML =
+    '<div class="pdf-sheet-inner">' +
+      '<header class="pdf-header">' +
+        '<div class="pdf-brand">' +
+          '<h1>المحلل المالي</h1>' +
+          '<p>تقرير تحليل البيانات المالية — Google Sheets</p>' +
+        '</div>' +
+        '<div class="pdf-logo">' +
+          '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#141d33" stroke-width="2.2">' +
+            '<path d="M3 3v18h18M7 16l4-4 4 4 5-6" stroke-linecap="round" stroke-linejoin="round"/>' +
+          '</svg>' +
+        '</div>' +
+      '</header>' +
+      '<div class="pdf-meta">' +
+        '<div class="pdf-meta-row"><span class="pdf-meta-label">التاريخ</span><span class="pdf-meta-value">' + escapeHtml(formatPdfDate(timestamp)) + '</span></div>' +
+        (role ? '<div class="pdf-meta-row"><span class="pdf-meta-label">الدور</span><span class="pdf-meta-value">' + escapeHtml(role) + '</span></div>' : '') +
+        (userQuestion ? '<div class="pdf-meta-row"><span class="pdf-meta-label">السؤال</span><span class="pdf-meta-value">' + escapeHtml(userQuestion) + '</span></div>' : '') +
+      '</div>' +
+      body +
+      '<footer class="pdf-footer">تم إنشاء هذا التقرير آلياً بواسطة المحلل المالي — الأرقام محسوبة من Google Sheets</footer>' +
+    '</div>';
+
+  return sheet;
+}
+
+async function exportResultToPdf(btn) {
+  const container = btn.closest('.msg.agent');
+  const payload = container?._exportPayload;
+  if (!payload || typeof html2pdf === 'undefined') return;
+
+  btn.disabled = true;
+  const prevLabel = btn.innerHTML;
+  btn.innerHTML =
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+      '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg> جاري التصدير...';
+
+  try {
+    await document.fonts.ready;
+    await new Promise(r => setTimeout(r, 450));
+
+    const chartImages = captureChartsFromMessage(container);
+    const sheet = buildPdfSheet(payload, chartImages);
+    sheet.style.position = 'fixed';
+    sheet.style.left = '-99999px';
+    sheet.style.top = '0';
+    sheet.style.zIndex = '-1';
+    document.body.appendChild(sheet);
+
+    await html2pdf().set({
+      margin: [0, 0, 0, 0],
+      filename: buildPdfFilename(payload),
+      image: { type: 'jpeg', quality: 0.96 },
+      html2canvas: {
+        scale: 2,
+        useCORS: true,
+        letterRendering: true,
+        scrollY: 0,
+        windowWidth: sheet.scrollWidth,
+      },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
+      pagebreak: { mode: ['css', 'legacy'], before: '.pdf-page-break', avoid: '.pdf-chart-block' },
+    }).from(sheet).save();
+
+    sheet.remove();
+  } catch (err) {
+    alert('تعذّر تصدير PDF: ' + (err.message || 'خطأ غير معروف'));
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = prevLabel;
+  }
 }
 
 async function sendMsg() {
@@ -1349,7 +1806,7 @@ async function sendMsg() {
     const chatData = await chatRes.json();
     if (!chatRes.ok) throw new Error(chatData.error || 'فشل إرسال الرسالة');
 
-    renderAgentResponse(loadDiv, chatData);
+    renderAgentResponse(loadDiv, chatData, text);
 
   } catch(e) {
     loadDiv.className = 'msg agent';
