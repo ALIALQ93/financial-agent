@@ -7,7 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   :root {
     --navy-900: #0c1222;
@@ -698,9 +699,20 @@
   }
   .pdf-export-btn svg { flex-shrink: 0; }
 
-  /* ── PDF print sheet (off-screen) ── */
+  /* ── PDF print sheet ── */
+  .pdf-export-host {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 794px;
+    z-index: 2147483646;
+    background: #fff;
+    opacity: 0;
+    pointer-events: none;
+    overflow: visible;
+  }
   .pdf-sheet {
-    width: 210mm;
+    width: 794px;
     background: #fff;
     font-family: 'IBM Plex Sans Arabic', 'Segoe UI', Tahoma, sans-serif;
     direction: rtl;
@@ -712,13 +724,16 @@
     padding: 14mm 16mm 18mm;
   }
   .pdf-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
+    display: table;
+    width: 100%;
     padding-bottom: 10px;
     margin-bottom: 14px;
     border-bottom: 3px solid #d4a853;
+  }
+  .pdf-header-row { display: table-row; }
+  .pdf-brand {
+    display: table-cell;
+    vertical-align: top;
   }
   .pdf-brand h1 {
     font-size: 20px;
@@ -733,14 +748,14 @@
     color: #64748b;
   }
   .pdf-logo {
+    display: table-cell;
+    vertical-align: top;
     width: 44px;
     height: 44px;
     border-radius: 10px;
-    background: linear-gradient(135deg, #d4a853, #e8c468);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
+    background: #d4a853;
+    text-align: center;
+    padding-top: 10px;
   }
   .pdf-meta {
     background: #f8fafc;
@@ -752,37 +767,27 @@
     line-height: 1.7;
   }
   .pdf-meta-row {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
+    margin-bottom: 4px;
   }
+  .pdf-meta-row:last-child { margin-bottom: 0; }
   .pdf-meta-label {
     font-weight: 700;
     color: #475569;
+    display: inline-block;
     min-width: 72px;
   }
-  .pdf-meta-value { color: #0f172a; flex: 1; }
+  .pdf-meta-value { color: #0f172a; display: inline; }
   .pdf-section {
     margin-bottom: 18px;
-    page-break-inside: avoid;
   }
   .pdf-section-title {
     font-size: 13px;
     font-weight: 700;
     color: #141d33;
     margin: 0 0 10px;
-    padding-bottom: 6px;
+    padding: 0 10px 6px 0;
     border-bottom: 2px solid #e2e8f0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .pdf-section-title::before {
-    content: '';
-    width: 4px;
-    height: 14px;
-    background: #d4a853;
-    border-radius: 2px;
+    border-right: 4px solid #d4a853;
   }
   .pdf-text {
     font-size: 12px;
@@ -798,7 +803,7 @@
     font-size: 11px;
     font-weight: 700;
     color: #fff;
-    background: linear-gradient(135deg, #141d33, #1a2744);
+    background: #141d33;
     padding: 8px 12px;
     border-radius: 8px 8px 0 0;
     margin: 0;
@@ -835,7 +840,6 @@
   .pdf-table tr:last-child td { border-bottom: none; }
   .pdf-chart-block {
     margin-bottom: 16px;
-    page-break-inside: avoid;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
     padding: 12px;
@@ -853,10 +857,9 @@
   .pdf-chart-block img {
     display: block;
     width: 100%;
-    max-height: 90mm;
+    max-height: 320px;
     object-fit: contain;
   }
-  .pdf-page-break { page-break-before: always; height: 0; }
   .pdf-footer {
     margin-top: 20px;
     padding-top: 10px;
@@ -1676,8 +1679,7 @@ function buildPdfSheet(payload, chartImages) {
 
   if (data.tables && data.tables.length) {
     body += '<div class="pdf-section"><h2 class="pdf-section-title">الجداول</h2>';
-    data.tables.forEach((t, i) => {
-      if (i > 0 && i % 2 === 0) body += '<div class="pdf-page-break"></div>';
+    data.tables.forEach(t => {
       body += buildPdfTableHtml(t);
     });
     body += '</div>';
@@ -1685,8 +1687,7 @@ function buildPdfSheet(payload, chartImages) {
 
   if (chartImages.length) {
     body += '<div class="pdf-section"><h2 class="pdf-section-title">المخططات</h2>';
-    chartImages.forEach((chart, i) => {
-      if (i > 0) body += '<div class="pdf-page-break"></div>';
+    chartImages.forEach(chart => {
       body += '<div class="pdf-chart-block">' +
         '<h3>' + escapeHtml(chart.title) + '</h3>' +
         '<img src="' + chart.dataUrl + '" alt="' + escapeHtml(chart.title) + '">' +
@@ -1698,14 +1699,16 @@ function buildPdfSheet(payload, chartImages) {
   sheet.innerHTML =
     '<div class="pdf-sheet-inner">' +
       '<header class="pdf-header">' +
-        '<div class="pdf-brand">' +
-          '<h1>المحلل المالي</h1>' +
-          '<p>تقرير تحليل البيانات المالية — Google Sheets</p>' +
-        '</div>' +
-        '<div class="pdf-logo">' +
-          '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#141d33" stroke-width="2.2">' +
-            '<path d="M3 3v18h18M7 16l4-4 4 4 5-6" stroke-linecap="round" stroke-linejoin="round"/>' +
-          '</svg>' +
+        '<div class="pdf-header-row">' +
+          '<div class="pdf-brand">' +
+            '<h1>المحلل المالي</h1>' +
+            '<p>تقرير تحليل البيانات المالية — Google Sheets</p>' +
+          '</div>' +
+          '<div class="pdf-logo">' +
+            '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#141d33" stroke-width="2.2">' +
+              '<path d="M3 3v18h18M7 16l4-4 4 4 5-6" stroke-linecap="round" stroke-linejoin="round"/>' +
+            '</svg>' +
+          '</div>' +
         '</div>' +
       '</header>' +
       '<div class="pdf-meta">' +
@@ -1723,7 +1726,11 @@ function buildPdfSheet(payload, chartImages) {
 async function exportResultToPdf(btn) {
   const container = btn.closest('.msg.agent');
   const payload = container?._exportPayload;
-  if (!payload || typeof html2pdf === 'undefined') return;
+  if (!payload) return;
+  if (typeof html2canvas === 'undefined' || !window.jspdf?.jsPDF) {
+    alert('مكتبات التصدير غير محمّلة. أعد تحميل الصفحة.');
+    return;
+  }
 
   btn.disabled = true;
   const prevLabel = btn.innerHTML;
@@ -1731,37 +1738,69 @@ async function exportResultToPdf(btn) {
     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
       '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg> جاري التصدير...';
 
+  let host = null;
+
   try {
     await document.fonts.ready;
-    await new Promise(r => setTimeout(r, 450));
-
     const chartImages = captureChartsFromMessage(container);
     const sheet = buildPdfSheet(payload, chartImages);
-    sheet.style.position = 'fixed';
-    sheet.style.left = '-99999px';
-    sheet.style.top = '0';
-    sheet.style.zIndex = '-1';
-    document.body.appendChild(sheet);
 
-    await html2pdf().set({
-      margin: [0, 0, 0, 0],
-      filename: buildPdfFilename(payload),
-      image: { type: 'jpeg', quality: 0.96 },
-      html2canvas: {
-        scale: 2,
-        useCORS: true,
-        letterRendering: true,
-        scrollY: 0,
-        windowWidth: sheet.scrollWidth,
-      },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
-      pagebreak: { mode: ['css', 'legacy'], before: '.pdf-page-break', avoid: '.pdf-chart-block' },
-    }).from(sheet).save();
+    host = document.createElement('div');
+    host.className = 'pdf-export-host';
+    host.appendChild(sheet);
+    document.body.appendChild(host);
 
-    sheet.remove();
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    await new Promise(r => setTimeout(r, 300));
+
+    const canvas = await html2canvas(sheet, {
+      scale: 2,
+      useCORS: true,
+      allowTaint: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+      width: sheet.scrollWidth,
+      height: sheet.scrollHeight,
+      windowWidth: sheet.scrollWidth,
+      windowHeight: sheet.scrollHeight,
+    });
+
+    if (!canvas.width || !canvas.height) {
+      throw new Error('فشل التقاط محتوى التقرير');
+    }
+
+    const pdf = new window.jspdf.jsPDF({
+      unit: 'mm',
+      format: 'a4',
+      orientation: 'portrait',
+      compress: true,
+    });
+
+    const pageW = 210;
+    const pageH = 297;
+    const margin = 10;
+    const contentW = pageW - margin * 2;
+    const contentH = pageH - margin * 2;
+    const imgW = contentW;
+    const imgH = (canvas.height * imgW) / canvas.width;
+    const imgData = canvas.toDataURL('image/jpeg', 0.92);
+
+    let yOffset = 0;
+    let page = 0;
+
+    while (yOffset < imgH - 0.5) {
+      if (page > 0) pdf.addPage();
+      pdf.addImage(imgData, 'JPEG', margin, margin - yOffset, imgW, imgH);
+      yOffset += contentH;
+      page++;
+      if (page > 80) break;
+    }
+
+    pdf.save(buildPdfFilename(payload));
   } catch (err) {
     alert('تعذّر تصدير PDF: ' + (err.message || 'خطأ غير معروف'));
   } finally {
+    if (host) host.remove();
     btn.disabled = false;
     btn.innerHTML = prevLabel;
   }
