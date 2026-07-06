@@ -152,6 +152,26 @@
   [data-theme="dark"] .theme-toggle .icon-sun { display: block; }
   [data-theme="dark"] .theme-toggle .icon-moon { display: none; }
 
+  .currency-toggle {
+    display: flex; flex-shrink: 0;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.06);
+    overflow: hidden;
+  }
+  .currency-toggle .cur-opt {
+    border: none; background: transparent;
+    color: rgba(255,255,255,0.75);
+    font-size: 12px; font-weight: 700;
+    padding: 6px 11px; cursor: pointer;
+    transition: all .2s; font-family: inherit;
+  }
+  .currency-toggle .cur-opt:hover { color: var(--gold-400); }
+  .currency-toggle .cur-opt.active {
+    background: var(--gold-500);
+    color: #1a1a1a;
+  }
+
   .header-roles {
     margin-right: auto;
     display: flex;
@@ -1157,6 +1177,10 @@
     <button class="role-btn" onclick="setRole(this,'مدير مشروع')">مدير مشروع</button>
     <button class="role-btn" onclick="setRole(this,'محاسب')">محاسب</button>
   </div>
+  <div class="currency-toggle" id="currencyToggle" title="عملة عرض التقارير">
+    <button class="cur-opt active" data-cur="USD" onclick="setCurrency('USD', this)">USD</button>
+    <button class="cur-opt" data-cur="IQD" onclick="setCurrency('IQD', this)">IQD</button>
+  </div>
   <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" aria-label="تبديل المظهر" title="تبديل المظهر الفاتح/الداكن">
     <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1274,6 +1298,7 @@
 
 <script>
 let currentRole = 'مدير عام';
+let selectedCurrency = (localStorage.getItem('displayCurrency') === 'IQD') ? 'IQD' : 'USD';
 let isConfigured = false;
 let stickToBottom = true;
 let isSending = false;
@@ -1375,6 +1400,20 @@ function fmtUsdShort(n) {
   const v = Math.round(Math.abs(Number(n) || 0));
   return v.toLocaleString('en-US') + ' USD';
 }
+
+function setCurrency(cur, btn) {
+  selectedCurrency = cur === 'IQD' ? 'IQD' : 'USD';
+  localStorage.setItem('displayCurrency', selectedCurrency);
+  document.querySelectorAll('#currencyToggle .cur-opt').forEach(b => {
+    b.classList.toggle('active', b.dataset.cur === selectedCurrency);
+  });
+}
+
+(function initCurrencyToggle() {
+  document.querySelectorAll('#currencyToggle .cur-opt').forEach(b => {
+    b.classList.toggle('active', b.dataset.cur === selectedCurrency);
+  });
+})();
 
 function projectQueryParams() {
   const params = new URLSearchParams();
@@ -1676,22 +1715,20 @@ function renderProjectList(projects) {
     btn.setAttribute('role', 'button');
     btn.tabIndex = 0;
     btn.dataset.name = (p.name + ' ' + p.code).toLowerCase();
-    const curClass = p.currency === 'IQD' ? 'cur iqd' : 'cur';
     const shortName = p.name.length > 28 ? p.name.slice(0, 28) + '…' : p.name;
     btn.innerHTML =
       '<div class="proj-info">' +
         '<span class="proj-name">' + escapeHtml(shortName) + '</span>' +
         '<span class="proj-code">' + escapeHtml(p.code || '') + '</span>' +
       '</div>' +
-      '<span class="proj-report" role="button" tabindex="0" title="تقرير المشروع">تقرير</span>' +
-      '<span class="' + curClass + '">' + escapeHtml(p.currency) + '</span>';
+      '<span class="proj-report" role="button" tabindex="0" title="تقرير المشروع">تقرير</span>';
     btn.title = p.name + ' — انقر للتحديد للحسابات';
     btn.onclick = (e) => {
       if (e.target.closest('.proj-report')) {
         e.stopPropagation();
         selectProject(p, btn);
         document.getElementById('sidebar').classList.remove('open');
-        quickSend('تقرير مشروع ' + p.name + ' — اعرض الصافي USD والقيمة بعملة المشروع (' + p.currency + ')');
+        quickSend('تقرير مشروع ' + p.name);
         return;
       }
       selectProject(p, btn);
@@ -1710,7 +1747,7 @@ function filterProjects() {
   const q = document.getElementById('projectSearch').value.trim().toLowerCase();
   if (!q) { renderProjectList(allProjects); return; }
   renderProjectList(allProjects.filter(p =>
-    (p.name + ' ' + p.code + ' ' + p.currency).toLowerCase().includes(q)
+    (p.name + ' ' + p.code).toLowerCase().includes(q)
   ));
 }
 
@@ -2212,7 +2249,7 @@ async function runRequest(fullMsg, text) {
     const chatRes = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: fullMsg }),
+      body: JSON.stringify({ message: fullMsg, currency: selectedCurrency }),
       signal: currentAbort.signal,
     });
 

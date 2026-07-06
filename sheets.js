@@ -71,23 +71,23 @@ function rowsToRecords(rows) {
   });
 }
 
-async function buildSheetReport(userMessage) {
+async function buildSheetReport(userMessage, currency) {
   if (!SHEET_ID) return { context: '', tables: [], charts: [] };
 
   const rows = await fetchSheetRows();
   const records = rowsToRecords(rows);
   if (!records.length) return { context: '', tables: [], charts: [] };
 
-  const visuals = buildVisuals(records, userMessage);
+  const visuals = buildVisuals(records, userMessage, currency);
   return {
-    context: buildContext(records, userMessage),
+    context: buildContext(records, userMessage, currency),
     tables: visuals.tables,
     charts: visuals.charts,
   };
 }
 
-async function buildSheetContext(userMessage) {
-  const report = await buildSheetReport(userMessage);
+async function buildSheetContext(userMessage, currency) {
+  const report = await buildSheetReport(userMessage, currency);
   return report.context;
 }
 

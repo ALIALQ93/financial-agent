@@ -149,13 +149,13 @@ app.post('/api/chat', async (req, res) => {
     });
   }
 
-  const { message } = req.body;
+  const { message, currency } = req.body;
   if (!message?.trim()) {
     return res.status(400).json({ error: 'الرسالة فارغة' });
   }
 
   try {
-    const report = await buildSheetReport(message);
+    const report = await buildSheetReport(message, currency);
     const reply = AI_PROVIDER === 'gemini'
       ? await chatWithGemini(message, report.context)
       : await chatWithGroq(message, report.context);

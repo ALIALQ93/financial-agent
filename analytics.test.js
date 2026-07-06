@@ -10,6 +10,9 @@ const {
   sumExpenseGroupRows,
   buildContext,
   buildVisuals,
+  detectCurrency,
+  money,
+  setDisplayCurrency,
 } = require('./analytics');
 
 function mockRec(overrides = {}) {
@@ -188,5 +191,46 @@ describe('account recognition', () => {
     const { tables } = buildVisuals(accountRecords, q);
     assert.ok(tables.some(t => t.title.includes('اختبار QC')));
     assert.ok(tables.some(t => t.headers?.includes('نوع السجل')));
+  });
+});
+
+const iqdRecords = [
+  mockRec({ net: 10000, exchangeRate: 1470 }),
+  mockRec({ accountName: 'اختبار QC', net: 5000, exchangeRate: 1470 }),
+];
+
+describe('currency handling', () => {
+  it('detects currency from Arabic text', () => {
+    assert.equal(detectCurrency('كم مصاريف الفحص بالدينار'), 'IQD');
+    assert.equal(detectCurrency('التقرير بالدولار'), 'USD');
+    assert.equal(detectCurrency('تقرير مشروع كذا'), null);
+  });
+
+  it('formats in USD by default and IQD on request', () => {
+    setDisplayCurrency('USD');
+    assert.match(money(1000, 1470000), /1,000 USD/);
+    setDisplayCurrency('IQD');
+    assert.match(money(1000, 1470000), /1,470,000 IQD/);
+    setDisplayCurrency('USD');
+  });
+
+  it('reports totals in requested currency using per-record rate', () => {
+    const usd = buildContext(iqdRecords, 'مصاريف الفحص والاختبار كل المشاريع', 'USD');
+    assert.match(usd, /15,000 USD/);
+    assert.match(usd, /عملة العرض: \*\*USD\*\*/);
+
+    const iqd = buildContext(iqdRecords, 'مصاريف الفحص والاختبار كل المشاريع', 'IQD');
+    assert.match(iqd, /22,050,000 IQD/);
+    assert.match(iqd, /عملة العرض: \*\*IQD\*\*/);
+  });
+
+  it('lets typed currency override the UI selection', () => {
+    const ctx = buildContext(iqdRecords, 'مصاريف الفحص والاختبار كل المشاريع بالدينار', 'USD');
+    assert.match(ctx, /عملة العرض: \*\*IQD\*\*/);
+  });
+
+  it('labels visual table headers with the display currency', () => {
+    const { tables } = buildVisuals(iqdRecords, 'مصاريف الفحص والاختبار كل المشاريع', 'IQD');
+    assert.ok(tables.some(t => (t.headers || []).some(h => h.includes('IQD'))));
   });
 });
