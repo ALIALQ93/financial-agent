@@ -698,6 +698,15 @@
   }
   button.send:disabled { background: var(--slate-300); box-shadow: none; cursor: not-allowed; transform: none; }
 
+  button.send .icon-stop { display: none; }
+  button.send.sending {
+    background: linear-gradient(135deg, var(--red), #b5343a);
+    color: #fff;
+  }
+  button.send.sending:hover { background: linear-gradient(135deg, #b5343a, var(--red)); color: #fff; }
+  button.send.sending .icon-stop { display: block; }
+  button.send.sending .icon-send { display: none; }
+
   /* ── Tables & Charts ── */
   .data-table-wrap {
     overflow-x: auto;
@@ -807,6 +816,67 @@
     cursor: wait;
   }
   .pdf-export-btn svg { flex-shrink: 0; }
+
+  /* ── Copy / Retry action buttons ── */
+  .msg-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--heading);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .msg-action-btn:hover {
+    border-color: var(--gold-500);
+    background: var(--hover-tint);
+    color: var(--gold-500);
+  }
+  .msg-action-btn svg { flex-shrink: 0; }
+  .msg-action-btn.copied {
+    border-color: var(--green);
+    color: var(--green);
+    background: rgba(45, 106, 79, 0.08);
+  }
+
+  /* ── Error message + retry ── */
+  .msg.agent.error {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-right: 3px solid var(--red);
+    color: #991b1b;
+  }
+  [data-theme="dark"] .msg.agent.error {
+    background: rgba(155, 34, 38, 0.15);
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #fca5a5;
+  }
+  .error-head { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .error-head svg { flex-shrink: 0; }
+  .retry-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+    padding: 7px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--red);
+    background: var(--red);
+    color: #fff;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .retry-btn:hover { background: #b5343a; border-color: #b5343a; }
+  .retry-btn svg { flex-shrink: 0; }
 
   /* ── PDF print sheet ── */
   .pdf-export-host {
@@ -1176,9 +1246,12 @@
         <textarea id="msgInput" placeholder="اكتب سؤالك هنا..." rows="1"
           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMsg()}"
           oninput="this.style.height='48px';this.style.height=this.scrollHeight+'px'"></textarea>
-        <button class="send" id="sendBtn" onclick="sendMsg()" aria-label="إرسال">
-          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <button class="send" id="sendBtn" onclick="onSendClick()" aria-label="إرسال">
+          <svg class="icon-send" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <svg class="icon-stop" width="18" height="18" fill="currentColor" stroke="none" viewBox="0 0 24 24">
+            <rect x="6" y="6" width="12" height="12" rx="2"/>
           </svg>
         </button>
       </div>
@@ -1190,6 +1263,10 @@
 let currentRole = 'مدير عام';
 let isConfigured = false;
 let stickToBottom = true;
+let isSending = false;
+let currentAbort = null;
+let lastRequest = null;
+const REQUEST_TIMEOUT_MS = 60000;
 let allProjects = [];
 let allGroups = [];
 let allAccounts = [];
@@ -1209,6 +1286,29 @@ function toggleTheme() {
   document.documentElement.setAttribute('data-theme', next);
   try { localStorage.setItem('fa-theme', next); } catch (e) {}
   refreshChartThemes();
+}
+
+function onSendClick() {
+  if (isSending) {
+    cancelRequest();
+  } else {
+    sendMsg();
+  }
+}
+
+function setSendingState(sending) {
+  isSending = sending;
+  const btn = document.getElementById('sendBtn');
+  if (!btn) return;
+  btn.classList.toggle('sending', sending);
+  btn.setAttribute('aria-label', sending ? 'إيقاف' : 'إرسال');
+  btn.title = sending ? 'إيقاف الطلب' : 'إرسال';
+}
+
+function cancelRequest() {
+  if (currentAbort) {
+    currentAbort.abort();
+  }
 }
 
 function setRole(btn, role) {
@@ -1796,7 +1896,15 @@ function renderAgentResponse(container, data, userQuestion) {
           '<path d="M12 3v12M7 10l5 5 5-5M5 21h14" stroke-linecap="round" stroke-linejoin="round"/>' +
         '</svg>' +
         'تصدير PDF' +
-      '</button>';
+      '</button>' +
+      (data.reply
+        ? '<button type="button" class="msg-action-btn" onclick="copyAnswer(this)" aria-label="نسخ الإجابة">' +
+            '<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">' +
+              '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke-linecap="round" stroke-linejoin="round"/>' +
+            '</svg>' +
+            '<span class="copy-label">نسخ</span>' +
+          '</button>'
+        : '');
     container.appendChild(actions);
   }
 
@@ -1998,40 +2106,96 @@ async function exportResultToPdf(btn) {
   }
 }
 
-async function sendMsg() {
-  const input = document.getElementById('msgInput');
-  const text = input.value.trim();
-  if (!text) return;
+async function copyAnswer(btn) {
+  const container = btn.closest('.msg.agent');
+  const reply = container?._exportPayload?.data?.reply;
+  if (!reply) return;
 
+  const label = btn.querySelector('.copy-label');
+  const original = label ? label.textContent : '';
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(reply);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = reply;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    btn.classList.add('copied');
+    if (label) label.textContent = 'تم النسخ';
+  } catch (e) {
+    if (label) label.textContent = 'تعذّر النسخ';
+  }
+  setTimeout(() => {
+    btn.classList.remove('copied');
+    if (label) label.textContent = original || 'نسخ';
+  }, 1600);
+}
+
+function showErrorMessage(container, message, opts) {
+  const options = opts || {};
+  container.className = 'msg agent error';
+  const canRetry = options.retry !== false;
+  container.innerHTML =
+    '<div class="error-head">' +
+      '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">' +
+        '<circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01" stroke-linecap="round"/></svg>' +
+      escapeHtml(options.title || 'تعذّر إكمال الطلب') +
+    '</div>' +
+    '<div style="margin-top:6px">' + escapeHtml(message) + '</div>' +
+    (canRetry
+      ? '<button type="button" class="retry-btn" onclick="retryLast()">' +
+          '<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">' +
+            '<path d="M23 4v6h-6M1 20v-6h6" stroke-linecap="round" stroke-linejoin="round"/>' +
+            '<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" stroke-linecap="round" stroke-linejoin="round"/>' +
+          '</svg> إعادة المحاولة</button>'
+      : '') +
+    '<div class="msg-time">' + now() + '</div>';
+  scrollChatSoon();
+}
+
+function retryLast() {
+  if (!lastRequest || isSending) return;
+  runRequest(lastRequest.fullMsg, lastRequest.text);
+}
+
+async function runRequest(fullMsg, text) {
   stickToBottom = true;
-  const fullMsg = 'أنا ' + currentRole + '. ' + text;
-
-  input.value = '';
-  input.style.height = '48px';
-  document.getElementById('sendBtn').disabled = true;
-
-  addMsg(text, 'user');
+  lastRequest = { fullMsg, text };
+  setSendingState(true);
 
   const loadDiv = addMsg('', 'agent loading');
 
+  currentAbort = new AbortController();
+  const timeoutId = setTimeout(() => {
+    if (currentAbort) currentAbort.abort('timeout');
+  }, REQUEST_TIMEOUT_MS);
+
   try {
     if (!isConfigured) {
-      const healthRes = await fetch('/api/health');
+      const healthRes = await fetch('/api/health', { signal: currentAbort.signal });
       const healthData = await healthRes.json();
       isConfigured = healthData.configured;
     }
 
     if (!isConfigured) {
-      loadDiv.className = 'msg agent';
-      loadDiv.innerHTML = '⚠️ الرجاء إضافة GROQ_API_KEY في ملف .env أو Render Environment.' +
-        '<div class="msg-time">' + now() + '</div>';
+      showErrorMessage(loadDiv, 'الرجاء إضافة GROQ_API_KEY في ملف .env أو في إعدادات Render، ثم أعد المحاولة.', {
+        title: 'الإعداد غير مكتمل',
+        retry: false,
+      });
       return;
     }
 
     const chatRes = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: fullMsg })
+      body: JSON.stringify({ message: fullMsg }),
+      signal: currentAbort.signal,
     });
 
     const chatData = await chatRes.json();
@@ -2039,15 +2203,45 @@ async function sendMsg() {
 
     renderAgentResponse(loadDiv, chatData, text);
 
-  } catch(e) {
-    loadDiv.className = 'msg agent';
-    loadDiv.innerHTML = '⚠️ حدث خطأ: ' + escapeHtml(e.message) +
-      '<div class="msg-time">' + now() + '</div>';
+  } catch (e) {
+    const aborted = currentAbort && currentAbort.signal.aborted;
+    if (aborted) {
+      if (currentAbort.signal.reason === 'timeout') {
+        showErrorMessage(loadDiv, 'استغرق الطلب وقتاً طويلاً (أكثر من دقيقة). تحقق من الاتصال ثم أعد المحاولة.', {
+          title: 'انتهت مهلة الطلب',
+        });
+      } else {
+        loadDiv.className = 'msg agent';
+        loadDiv.innerHTML = 'تم إيقاف الطلب.' + '<div class="msg-time">' + now() + '</div>';
+      }
+    } else {
+      showErrorMessage(loadDiv, (e && e.message) || 'خطأ غير معروف');
+    }
   } finally {
-    document.getElementById('sendBtn').disabled = false;
+    clearTimeout(timeoutId);
+    currentAbort = null;
+    setSendingState(false);
     scrollChatSoon();
   }
 }
+
+function sendMsg() {
+  if (isSending) return;
+  const input = document.getElementById('msgInput');
+  const text = input.value.trim();
+  if (!text) return;
+
+  const fullMsg = 'أنا ' + currentRole + '. ' + text;
+  input.value = '';
+  input.style.height = '48px';
+
+  addMsg(text, 'user');
+  runRequest(fullMsg, text);
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && isSending) cancelRequest();
+});
 </script>
 </body>
 </html>
