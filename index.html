@@ -131,6 +131,27 @@
     flex-shrink: 0;
   }
 
+  .theme-toggle {
+    width: 34px; height: 34px;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.85);
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .theme-toggle:hover {
+    border-color: var(--gold-500);
+    background: rgba(255,255,255,0.12);
+    color: var(--gold-400);
+  }
+  .theme-toggle svg { width: 18px; height: 18px; }
+  .theme-toggle .icon-sun { display: none; }
+  [data-theme="dark"] .theme-toggle .icon-sun { display: block; }
+  [data-theme="dark"] .theme-toggle .icon-moon { display: none; }
+
   .header-roles {
     margin-right: auto;
     display: flex;
@@ -540,6 +561,35 @@
   }
   .msg.welcome strong { color: var(--heading); }
 
+  .suggest-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+  }
+  .suggest-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 13px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all .18s;
+  }
+  .suggest-chip:hover {
+    border-color: var(--gold-500);
+    background: var(--hover-tint);
+    color: var(--heading);
+    transform: translateY(-1px);
+  }
+  .suggest-chip svg { width: 13px; height: 13px; color: var(--gold-500); flex-shrink: 0; }
+
   .msg.agent.loading {
     color: var(--slate-500);
     font-style: normal;
@@ -693,16 +743,16 @@
   .chart-wrap {
     margin: 14px 0;
     padding: 16px;
-    background: #fff;
+    background: var(--surface);
     border-radius: var(--radius-sm);
-    border: 1px solid var(--slate-200);
+    border: 1px solid var(--border);
     box-shadow: var(--shadow-sm);
   }
   .chart-wrap h4 {
     font-size: 12px;
     font-weight: 700;
     margin-bottom: 12px;
-    color: var(--navy-800);
+    color: var(--heading);
     padding-bottom: 8px;
     border-bottom: 2px solid var(--gold-500);
     display: inline-block;
@@ -730,7 +780,7 @@
     gap: 8px;
     margin-top: 12px;
     padding-top: 10px;
-    border-top: 1px dashed var(--slate-200);
+    border-top: 1px dashed var(--border);
   }
   .pdf-export-btn {
     display: inline-flex;
@@ -738,9 +788,9 @@
     gap: 6px;
     padding: 7px 14px;
     border-radius: 8px;
-    border: 1px solid var(--slate-200);
-    background: #fff;
-    color: var(--navy-800);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--heading);
     font-family: inherit;
     font-size: 12px;
     font-weight: 600;
@@ -749,8 +799,8 @@
   }
   .pdf-export-btn:hover {
     border-color: var(--gold-500);
-    background: #fffdf5;
-    color: var(--navy-900);
+    background: var(--hover-tint);
+    color: var(--gold-500);
   }
   .pdf-export-btn:disabled {
     opacity: 0.6;
@@ -965,18 +1015,18 @@
       gap: 6px;
       flex-wrap: wrap;
       padding: 10px 12px;
-      background: #fff;
-      border-bottom: 1px solid var(--slate-200);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
       flex-shrink: 0;
     }
     .mobile-roles .role-btn {
-      border-color: var(--slate-200);
-      background: var(--slate-50);
-      color: var(--slate-700);
+      border-color: var(--border);
+      background: var(--surface-2);
+      color: var(--text-secondary);
     }
     .mobile-roles .role-btn.active {
-      background: var(--navy-800);
-      color: #fff;
+      background: var(--gold-500);
+      color: var(--navy-900);
     }
     .chat-card { margin: 8px 8px 0; }
     .input-area { margin: 6px 8px 8px; }
@@ -992,6 +1042,17 @@
     header .brand span { display: none; }
   }
 </style>
+<script>
+  (function () {
+    try {
+      var saved = localStorage.getItem('fa-theme');
+      var theme = saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', theme);
+    } catch (e) {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+  })();
+</script>
 </head>
 <body>
 
@@ -1013,6 +1074,15 @@
     <button class="role-btn" onclick="setRole(this,'مدير مشروع')">مدير مشروع</button>
     <button class="role-btn" onclick="setRole(this,'محاسب')">محاسب</button>
   </div>
+  <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" aria-label="تبديل المظهر" title="تبديل المظهر الفاتح/الداكن">
+    <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="4"/>
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke-linecap="round"/>
+    </svg>
+  </button>
   <div class="status-badge">
     <div class="status-dot"></div>
     متصل
@@ -1113,6 +1183,14 @@ const chatArea = document.getElementById('chatArea');
 
 function toggleSidebar() {
   document.getElementById('sidebar').classList.toggle('open');
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('fa-theme', next); } catch (e) {}
+  refreshChartThemes();
 }
 
 function setRole(btn, role) {
@@ -1562,6 +1640,41 @@ function renderTable(table) {
 
 const CHART_PALETTE = ['#1e3a5f','#2d5a7b','#457b9d','#5c8eb3','#ca9a2e','#2d6a4f','#6b705c','#9b2226'];
 const CHART_DEFAULTS = { revenue: '#2d6a4f', costs: '#9b2226', profit: '#1e3a5f', margin: '#457b9d', accent: '#ca9a2e' };
+const chartInstances = [];
+
+function chartThemeColors() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  return {
+    grid: isDark ? 'rgba(148, 163, 184, 0.14)' : '#f1f5f9',
+    tick: isDark ? '#94a3b8' : '#64748b',
+    legend: isDark ? '#c2cede' : '#334155',
+    doughnutBorder: isDark ? '#131c30' : '#ffffff',
+  };
+}
+
+function refreshChartThemes() {
+  const c = chartThemeColors();
+  chartInstances.forEach(inst => {
+    if (!inst || !inst.options) return;
+    if (inst.options.scales) {
+      ['x', 'y'].forEach(axis => {
+        if (inst.options.scales[axis]) {
+          inst.options.scales[axis].grid.color = c.grid;
+          inst.options.scales[axis].ticks.color = c.tick;
+        }
+      });
+    }
+    if (inst.options.plugins?.legend?.labels) {
+      inst.options.plugins.legend.labels.color = c.legend;
+    }
+    inst.data.datasets.forEach(ds => {
+      if (Array.isArray(ds.backgroundColor) && ds.borderColor !== undefined) {
+        ds.borderColor = c.doughnutBorder;
+      }
+    });
+    inst.update('none');
+  });
+}
 
 function renderChart(chart, container) {
   const wrap = document.createElement('div');
@@ -1574,6 +1687,7 @@ function renderChart(chart, container) {
 
   const isHorizontal = chart.horizontal;
   const type = chart.type === 'doughnut' ? 'doughnut' : 'bar';
+  const theme = chartThemeColors();
 
   const datasets = chart.datasets.map((ds, i) => {
     const base = {
@@ -1584,7 +1698,7 @@ function renderChart(chart, container) {
     };
     if (type === 'doughnut') {
       base.backgroundColor = chart.colors || CHART_PALETTE;
-      base.borderColor = '#fff';
+      base.borderColor = theme.doughnutBorder;
       base.borderWidth = 2;
     } else {
       base.backgroundColor = ds.color || CHART_DEFAULTS[ds.label === 'الإيراد' ? 'revenue' :
@@ -1593,7 +1707,7 @@ function renderChart(chart, container) {
     return base;
   });
 
-  new Chart(canvas, {
+  const instance = new Chart(canvas, {
     type,
     data: { labels: chart.labels, datasets },
     options: {
@@ -1607,15 +1721,16 @@ function renderChart(chart, container) {
         legend: {
           position: 'bottom',
           rtl: true,
-          labels: { font: { family: 'IBM Plex Sans Arabic', size: 11 }, padding: 14, usePointStyle: true },
+          labels: { font: { family: 'IBM Plex Sans Arabic', size: 11 }, padding: 14, usePointStyle: true, color: theme.legend },
         },
       },
       scales: type === 'bar' ? {
-        x: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 10 }, color: '#64748b' } },
-        y: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 10 }, color: '#64748b' } },
+        x: { grid: { color: theme.grid }, ticks: { font: { size: 10 }, color: theme.tick } },
+        y: { grid: { color: theme.grid }, ticks: { font: { size: 10 }, color: theme.tick } },
       } : {},
     },
   });
+  chartInstances.push(instance);
 }
 
 function renderAgentResponse(container, data, userQuestion) {
