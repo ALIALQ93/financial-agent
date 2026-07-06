@@ -440,16 +440,18 @@ function findMatchingExpenseAccounts(records, query, groupName, project = null) 
   for (const r of scoped) {
     const name = (r.accountName || '').trim();
     if (!name) continue;
-    if (!accounts.has(name)) accounts.set(name, { name, score: 0 });
-    accounts.get(name).score = Math.max(
-      accounts.get(name).score,
-      scoreExpenseAccountMatch(name, query, groupName)
-    );
+    if (!accounts.has(name)) accounts.set(name, { name, code: (r.accountCode || '').trim(), score: 0 });
+    const entry = accounts.get(name);
+    if (!entry.code && r.accountCode) entry.code = String(r.accountCode).trim();
+    entry.score = Math.max(entry.score, scoreExpenseAccountMatch(name, query, groupName));
   }
+  const qNorm = normalizeForSearch(cleanQuery(query));
+  const codeNums = qNorm.match(/\d{2,}/g) || [];
   return [...accounts.values()]
     .filter(a => {
       const accN = normalizeForSearch(a.name);
-      const qNorm = normalizeForSearch(cleanQuery(query));
+      const codeHit = a.code && codeNums.includes(normalizeForSearch(a.code));
+      if (codeHit) return true;
       if (accN.split(/\s+/).length === 1 && groupN.includes(accN)) return false;
       return a.score >= 18 && accN.length >= 3 && qNorm.includes(accN);
     })
@@ -664,7 +666,11 @@ function buildExpenseGroupReport(records, expenseGroupQ) {
 
 function detectIntent(query, records) {
   const q = query.toLowerCase();
-  if (/إجمالي|كاملاً|كاملا|الشركة|شركة|ملخص الشركة|تقرير الشركة/.test(q) && !detectRecordType(query)) {
+  const accountQ = records?.length ? detectAccountQuery(query, records) : null;
+  // تطابق حساب قوي وواضح — يتقدّم على تخمين "الشركة" العام (كثير من أسماء الموردين تبدأ بـ "شركة")
+  const strongAccount = Boolean(accountQ?.account && !accountQ.ambiguous && accountQ.account.score >= 55);
+
+  if (/إجمالي|كاملاً|كاملا|الشركة|ملخص الشركة|تقرير الشركة/.test(q) && !detectRecordType(query) && !strongAccount) {
     return 'company';
   }
   if (/قارن|مقارنة|هامش|ترتيب|مقارنة بين/.test(q) && !detectRecordType(query)) return 'comparison';
@@ -673,6 +679,7 @@ function detectIntent(query, records) {
   const typeQ = detectRecordTypeQuery(query, records);
   if (typeQ?.type) return 'record_type';
   if (/مقاول|مورد|مجهز/.test(q)) return 'contractor';
+  if (accountQ?.account) return 'account';
   if (/بلا إيراد|لا إيراد|بدون إيراد|لا تحتوي.*ايراد|مشاريع.*إيراد/.test(q)) return 'no_revenue';
   if (records) {
     const matched = findMatchingProjects(records, query);
@@ -1291,6 +1298,226 @@ function buildContractorReport(records, query) {
   return out;
 }
 
+/* ── التعرّف على الحسابات والبحث عنها وتقاريرها المخصصة ── */
+
+const SCOPE_ALL_RE = /كل المشاريع|جميع المشاريع|لكل المشاريع|كل مشروع|على مستوى الشركة|مشاريع الشركة|كل المشروع/;
+
+const ACCOUNT_GENERIC_TERMS = new Set([
+  'حساب', 'الحساب', 'حسابات', 'الحسابات', 'رمز', 'الرمز', 'كود', 'بند', 'البند',
+  'مصروف', 'مصاريف', 'قيمه', 'قيمة', 'مجموع', 'اجمالي', 'إجمالي', 'تقرير',
+]);
+
+function getAllAccounts(records) {
+  const map = new Map();
+  for (const r of records) {
+    const name = (r.accountName || '').trim();
+    if (!name) continue;
+    if (!map.has(name)) {
+      map.set(name, { name, codes: new Set(), groups: new Set(), types: new Set() });
+    }
+    const a = map.get(name);
+    if (r.accountCode) a.codes.add(String(r.accountCode).trim());
+    if (r.group) a.groups.add(r.group);
+    if (r.recordType) a.types.add(r.recordType);
+  }
+  return [...map.values()].map(a => ({
+    name: a.name,
+    codes: [...a.codes].filter(Boolean),
+    groups: [...a.groups].filter(Boolean),
+    types: [...a.types].filter(Boolean),
+  }));
+}
+
+function accountNameTokens(name) {
+  return normalizeForSearch(name)
+    .split(/\s+/)
+    .filter(t => t.length >= 2 && !ACCOUNT_GENERIC_TERMS.has(t) && !QUERY_STOP_WORDS.has(t));
+}
+
+function scoreAccountMatch(account, query) {
+  const qNorm = normalizeForSearch(cleanQuery(query));
+  const tokens = extractQueryTokens(query).filter(t => !ACCOUNT_GENERIC_TERMS.has(t));
+  const nameN = normalizeForSearch(account.name);
+  let score = 0;
+
+  if (nameN.length >= 3 && qNorm.includes(nameN)) score += 60;
+
+  const codeNums = qNorm.match(/\d{2,}/g) || [];
+  for (const code of account.codes) {
+    const cN = normalizeForSearch(code);
+    if (!cN) continue;
+    if (codeNums.includes(cN)) score += 75;
+    else if (cN.length >= 3 && qNorm.includes(cN)) score += 45;
+  }
+
+  const nameTokens = accountNameTokens(account.name);
+  if (nameTokens.length) {
+    const matched = nameTokens.filter(t =>
+      tokens.some(qt =>
+        qt === t ||
+        (t.length >= 3 && qt.includes(t)) ||
+        (qt.length >= 3 && t.includes(qt))
+      )
+    );
+    if (matched.length === nameTokens.length) score += 42;
+    else if (matched.length) score += matched.length * 14;
+  }
+
+  return score;
+}
+
+function filterByAccount(records, account) {
+  const nameN = normalizeForSearch(account.name);
+  const codes = (account.codes || []).map(c => normalizeForSearch(c)).filter(Boolean);
+  return records.filter(r =>
+    normalizeForSearch(r.accountName) === nameN ||
+    (r.accountCode && codes.includes(normalizeForSearch(r.accountCode)))
+  );
+}
+
+function sumAccountRows(records) {
+  let netUsd = 0;
+  let netLocal = 0;
+  const byType = new Map();
+  const byProject = new Map();
+  for (const r of records) {
+    netUsd += r.net;
+    netLocal += r.net >= 0 ? localVal(r) : -localVal(r);
+    byType.set(r.recordType || 'أخرى', (byType.get(r.recordType || 'أخرى') || 0) + r.net);
+    const pk = r.projectName || r.projectCode || '—';
+    byProject.set(pk, (byProject.get(pk) || 0) + r.net);
+  }
+  return { netUsd, netLocal, count: records.length, byType, byProject };
+}
+
+function dominantRecordType(byType) {
+  let top = null;
+  let max = -Infinity;
+  for (const [type, net] of byType) {
+    if (Math.abs(net) > max) { max = Math.abs(net); top = type; }
+  }
+  return top;
+}
+
+function detectAccountQuery(query, records) {
+  if (!records || !records.length) return null;
+
+  const scored = getAllAccounts(records)
+    .map(a => ({ ...a, score: scoreAccountMatch(a, query) }))
+    .filter(a => a.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  if (!scored.length) return null;
+
+  const top = scored[0];
+  if (top.score < 40) return null;
+
+  const second = scored[1];
+  const ambiguous = Boolean(
+    second &&
+    top.score - second.score < 12 &&
+    second.score >= 40
+  );
+
+  const scopeAll = SCOPE_ALL_RE.test(query);
+
+  let project = null;
+  let projectAmbiguous = false;
+  let projectCandidates = [];
+
+  if (records && !scopeAll) {
+    const res = resolveProjectQuery(records, query);
+    if (res.status === 'unique') project = res.project;
+    else if (res.status === 'ambiguous') {
+      projectAmbiguous = true;
+      projectCandidates = res.candidates;
+    }
+  }
+
+  return {
+    account: top,
+    candidates: scored.slice(0, 5),
+    ambiguous,
+    project,
+    scopeAll: scopeAll || (!project && !projectAmbiguous),
+    projectAmbiguous,
+    projectCandidates,
+  };
+}
+
+function buildAccountDisambiguationTable(records, candidates) {
+  return {
+    title: 'حسابات متشابهة — يرجى التحديد',
+    headers: ['#', 'الحساب', 'الرمز', 'الحساب الاب', 'إجمالي USD', 'تطابق السؤال'],
+    rows: candidates.map((a, i) => {
+      const s = sumAccountRows(filterByAccount(records, a));
+      return [
+        String(i + 1),
+        a.name,
+        (a.codes || []).join('، ') || '—',
+        (a.groups || []).join('، ') || '—',
+        formatUSD(s.netUsd),
+        i === 0 ? `الأقرب (درجة ${a.score})` : `متشابه (درجة ${a.score})`,
+      ];
+    }),
+  };
+}
+
+function buildAccountReport(records, accountQuery) {
+  const { account, ambiguous, candidates, project, scopeAll, projectAmbiguous, projectCandidates } = accountQuery;
+  let out = `## تقرير حساب: **${account.name}** — محسوب مسبقاً\n\n`;
+
+  if (ambiguous) {
+    out += `⚠️ حسابات متشابهة: ${candidates.map(c => c.name).join(' | ')}\n`;
+    out += 'حدّد اسم الحساب بدقة أو استخدم الرمز.\n';
+    return out;
+  }
+
+  if (projectAmbiguous) {
+    out += `⚠️ مشاريع متشابهة: ${projectCandidates.map(p => p.name).join(' | ')}\n`;
+    out += 'حدّد المشروع بالكود أو الاسم الكامل.\n';
+    return out;
+  }
+
+  const scopeRecords = project ? filterByProject(records, project) : records;
+  const accRecords = filterByAccount(scopeRecords, account);
+  const s = sumAccountRows(accRecords);
+  const scopeLabel = project ? `مشروع: ${project.name} (${project.code})` : 'كل المشاريع';
+
+  out += `**النطاق:** ${scopeLabel}\n`;
+  if (account.codes.length) out += `**الرمز:** ${account.codes.join('، ')}\n`;
+  if (account.groups.length) out += `**الحساب الاب:** ${account.groups.join('، ')}\n`;
+  out += `**عدد السجلات:** ${s.count}\n`;
+  out += `**مجموع USD:** ${formatUSD(s.netUsd)}\n`;
+
+  const domType = dominantRecordType(s.byType);
+  if (domType) out += `**المعنى (${domType}):** ${recordTypeMeaning(domType, s.byType.get(domType))}\n`;
+  out += '\n';
+
+  if (!s.count) {
+    out += `⚠️ لا توجد سجلات للحساب "${account.name}"${project ? ` في مشروع ${project.name}` : ''}.\n`;
+    return out;
+  }
+
+  if (s.byType.size > 1) {
+    out += `**[ حسب نوع السجل ]**\n`;
+    for (const [type, net] of [...s.byType.entries()].sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))) {
+      out += `- ${type}: ${formatUSD(net)} — ${recordTypeMeaning(type, net)}\n`;
+    }
+    out += '\n';
+  }
+
+  if (scopeAll && !project && s.byProject.size > 1) {
+    out += `**[ حسب المشروع ]**\n`;
+    for (const [proj, net] of [...s.byProject.entries()].sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))) {
+      out += `- ${proj}: ${formatUSD(net)}\n`;
+    }
+    out += '\n';
+  }
+
+  return out;
+}
+
 function buildNoRevenueReport(records) {
   const projects = getAllProjects(records);
   const list = projects.filter(p => !analyzeProjectRecords(filterByProject(records, p)).hasRevenue);
@@ -1363,12 +1590,14 @@ function getExpenseAccountsForUI(records, { projectCode, projectName, groupName 
     if (!map.has(key)) {
       map.set(key, {
         name,
+        code: (r.accountCode || '').trim(),
         group: r.group || '',
         totalUsd: 0,
         count: 0,
       });
     }
     const a = map.get(key);
+    if (!a.code && r.accountCode) a.code = String(r.accountCode).trim();
     a.totalUsd += r.net;
     a.count++;
   }
@@ -1816,6 +2045,72 @@ function buildVisuals(records, userMessage) {
     }
   }
 
+  if (intent === 'account') {
+    const accountQuery = detectAccountQuery(query, records);
+    if (accountQuery && accountQuery.account) {
+      if (accountQuery.ambiguous) {
+        tables.push(buildAccountDisambiguationTable(records, accountQuery.candidates));
+      } else if (accountQuery.projectAmbiguous) {
+        tables.push(buildDisambiguationTable(records, accountQuery.projectCandidates));
+      } else {
+        const { account, project, scopeAll } = accountQuery;
+        const scopeRecords = project ? filterByProject(records, project) : records;
+        const accRecords = filterByAccount(scopeRecords, account);
+        const s = sumAccountRows(accRecords);
+        const cur = project ? dominantCurrency(accRecords) : dominantCurrency(accRecords);
+        const domType = dominantRecordType(s.byType);
+
+        tables.push({
+          title: `حساب: ${account.name}${project ? ` — ${project.name}` : ' — كل المشاريع'}`,
+          headers: ['البند', 'القيمة'],
+          rows: [
+            ...(account.codes.length ? [['الرمز', account.codes.join('، ')]] : []),
+            ...(account.groups.length ? [['الحساب الاب', account.groups.join('، ')]] : []),
+            ['عدد السجلات', String(s.count)],
+            ['مجموع USD', formatUSD(s.netUsd)],
+            ['مجموع محلي', formatLocalAmount(Math.abs(s.netLocal), cur)],
+            ...(domType ? [['المعنى', recordTypeMeaning(domType, s.byType.get(domType))]] : []),
+          ],
+        });
+
+        if (s.byType.size > 1) {
+          tables.push({
+            title: `${account.name} — حسب نوع السجل`,
+            headers: ['نوع السجل', 'الصافي USD', 'المعنى'],
+            rows: [...s.byType.entries()]
+              .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+              .map(([type, net]) => [type, formatUSD(net), recordTypeMeaning(type, net)]),
+          });
+        }
+
+        if (scopeAll && !project && s.byProject.size > 1) {
+          const projRows = [...s.byProject.entries()]
+            .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+          tables.push({
+            title: `${account.name} — حسب المشروع`,
+            headers: ['المشروع', 'الصافي USD'],
+            rows: projRows.map(([proj, net]) => [proj, formatUSD(net)]),
+          });
+
+          const chartData = projRows.filter(([, net]) => net !== 0).slice(0, 12);
+          if (chartData.length > 1) {
+            charts.push({
+              type: 'bar',
+              title: `${account.name} — حسب المشروع (USD)`,
+              labels: chartData.map(([proj]) => String(proj).slice(0, 16)),
+              datasets: [{ label: account.name, data: chartData.map(([, net]) => net), color: CHART_THEME.costs }],
+              horizontal: chartData.length > 6,
+            });
+          }
+        }
+
+        if (accRecords.length) {
+          tables.push(buildDetailTable(accRecords, `سجلات الحساب: ${account.name}`, 80));
+        }
+      }
+    }
+  }
+
   if (intent === 'no_revenue') {
     const list = getAllProjects(records).filter(p =>
       !analyzeProjectRecords(filterByProject(records, p)).hasRevenue
@@ -1843,7 +2138,10 @@ function buildContext(records, userMessage) {
   if (role) out += `دور المستخدم المحدد: **${role}**\n`;
   const expenseGroupQ = detectExpenseGroupQuery(query, records);
   if (expenseGroupQ?.group) out += `مجموعة المصروف: **${expenseGroupQ.group.name}**\n`;
-  else {
+  else if (intent === 'account') {
+    const accQ = detectAccountQuery(query, records);
+    if (accQ?.account) out += `الحساب المطلوب: **${accQ.account.name}**${accQ.account.codes.length ? ` (رمز: ${accQ.account.codes.join('، ')})` : ''}\n`;
+  } else {
     const typeQ = detectRecordTypeQuery(query, records);
     if (typeQ) out += `نوع السجل المطلوب: **${typeQ.label}**\n`;
   }
@@ -1870,6 +2168,11 @@ function buildContext(records, userMessage) {
     case 'record_type': {
       const typeQuery = detectRecordTypeQuery(query, records);
       if (typeQuery) out += buildRecordTypeReport(records, typeQuery, query);
+      break;
+    }
+    case 'account': {
+      const accountQuery = detectAccountQuery(query, records);
+      if (accountQuery) out += buildAccountReport(records, accountQuery);
       break;
     }
     case 'project': {
@@ -1920,6 +2223,10 @@ module.exports = {
   detectRecordType,
   detectRecordTypeQuery,
   detectExpenseGroupQuery,
+  detectAccountQuery,
+  getAllAccounts,
+  filterByAccount,
+  sumAccountRows,
   filterByRecordType,
   filterByExpenseGroup,
   findMatchingExpenseGroups,

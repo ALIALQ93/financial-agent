@@ -344,6 +344,19 @@
     color: var(--heading);
     font-weight: 500;
   }
+  .combo-item .combo-code {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    font-family: monospace;
+    color: var(--gold-500);
+    background: var(--hover-tint);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    margin-left: 4px;
+    vertical-align: middle;
+  }
   .combo-item .combo-meta {
     flex-shrink: 0;
     font-size: 10px;
@@ -1415,7 +1428,7 @@ function updateAccountControlsState() {
       ? 'اختر مشروعاً أولاً...'
       : !selectedGroup
         ? 'اختر الحساب الاب أولاً...'
-        : 'بحث أو اختيار حساب فرعي... (اختياري)';
+        : 'بحث بالاسم أو الرمز... (اختياري)';
   }
 
   updateAccountQueryBtn();
@@ -1548,7 +1561,9 @@ function renderAccountDropdown(query) {
 
   const q = (query || '').trim().toLowerCase();
   const items = q
-    ? allAccounts.filter(a => a.name.toLowerCase().includes(q))
+    ? allAccounts.filter(a =>
+        a.name.toLowerCase().includes(q) ||
+        String(a.code || '').toLowerCase().includes(q))
     : allAccounts;
 
   dropdown.innerHTML = '';
@@ -1559,8 +1574,11 @@ function renderAccountDropdown(query) {
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'combo-item' + (selectedAccount?.name === a.name ? ' selected' : '');
+      const codeTag = a.code
+        ? '<span class="combo-code">' + escapeHtml(String(a.code)) + '</span> '
+        : '';
       item.innerHTML =
-        '<span class="combo-label">' + escapeHtml(a.name) + '</span>' +
+        '<span class="combo-label">' + codeTag + escapeHtml(a.name) + '</span>' +
         '<span class="combo-meta">' + fmtUsdShort(a.totalUsd) + '</span>';
       item.onclick = () => selectAccount(a);
       dropdown.appendChild(item);

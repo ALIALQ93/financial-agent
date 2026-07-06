@@ -3,6 +3,9 @@ const assert = require('node:assert/strict');
 const {
   detectIntent,
   detectExpenseGroupQuery,
+  detectAccountQuery,
+  filterByAccount,
+  sumAccountRows,
   filterByExpenseGroup,
   sumExpenseGroupRows,
   buildContext,
@@ -109,5 +112,81 @@ describe('expense group detection', () => {
     });
     assert.equal(accounts.length, 2);
     assert.equal(accounts.reduce((s, a) => s + a.totalUsd, 0), 20800);
+    assert.ok(accounts.every(a => 'code' in a));
+  });
+});
+
+const accountRecords = [
+  mockRec({ accountName: 'اختبار QC', accountCode: '3255', net: 8300, localValue: 8300 }),
+  mockRec({
+    accountName: 'اختبار QC',
+    accountCode: '3255',
+    projectCode: 'WH',
+    projectName: 'Al-Waha',
+    currency: 'IQD',
+    net: 3200,
+    localValue: 4704000,
+  }),
+  mockRec({
+    group: 'مصاريف الرواتب والاجور',
+    accountName: 'رواتب المهندسين',
+    accountCode: '5101',
+    net: 45000,
+    localValue: 45000,
+  }),
+  mockRec({
+    recordType: 'المقاوليين',
+    group: 'المقاولين',
+    accountName: 'شركة البناء المتحد',
+    accountCode: '2010',
+    net: 60000,
+    localValue: 60000,
+  }),
+];
+
+describe('account recognition', () => {
+  it('detects a specific account by name', () => {
+    const q = 'تقرير حساب اختبار QC كل المشاريع';
+    assert.equal(detectIntent(q, accountRecords), 'account');
+    const aq = detectAccountQuery(q, accountRecords);
+    assert.equal(aq.account.name, 'اختبار QC');
+    assert.ok(aq.scopeAll);
+  });
+
+  it('detects an account by its code', () => {
+    const q = 'حساب 5101';
+    assert.equal(detectIntent(q, accountRecords), 'account');
+    const aq = detectAccountQuery(q, accountRecords);
+    assert.equal(aq.account.name, 'رواتب المهندسين');
+    assert.deepEqual(aq.account.codes, ['5101']);
+  });
+
+  it('scopes an account report to a project', () => {
+    const q = 'اختبار QC مشروع Al-Waha';
+    const aq = detectAccountQuery(q, accountRecords);
+    assert.equal(aq.account.name, 'اختبار QC');
+    assert.equal(aq.project.name, 'Al-Waha');
+    const scoped = filterByAccount(
+      accountRecords.filter(r => r.projectName === 'Al-Waha'),
+      aq.account
+    );
+    assert.equal(sumAccountRows(scoped).netUsd, 3200);
+  });
+
+  it('recognizes a contractor account across record types', () => {
+    const q = 'شركة البناء المتحد';
+    assert.equal(detectIntent(q, accountRecords), 'account');
+    const aq = detectAccountQuery(q, accountRecords);
+    assert.equal(aq.account.name, 'شركة البناء المتحد');
+  });
+
+  it('builds account context and visuals', () => {
+    const q = 'تقرير حساب اختبار QC كل المشاريع';
+    const ctx = buildContext(accountRecords, q);
+    assert.match(ctx, /تقرير حساب: \*\*اختبار QC\*\*/);
+    assert.match(ctx, /11,500 USD/);
+    const { tables } = buildVisuals(accountRecords, q);
+    assert.ok(tables.some(t => t.title.includes('اختبار QC')));
+    assert.ok(tables.some(t => t.headers?.includes('نوع السجل')));
   });
 });
