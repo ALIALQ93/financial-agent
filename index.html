@@ -356,7 +356,11 @@
   }
   .combo-item:last-child { border-bottom: none; }
   .combo-item:hover { background: var(--hover-tint); }
+  .combo-item.active { background: var(--hover-tint); box-shadow: inset 3px 0 0 var(--gold-500); }
   .combo-item.selected { background: rgba(212, 168, 83, 0.14); }
+  .combo-item.selected .combo-label::after {
+    content: '✓'; color: var(--gold-500); font-weight: 700; margin-right: 4px;
+  }
   .combo-item .combo-label {
     flex: 1;
     min-width: 0;
@@ -388,6 +392,44 @@
     font-size: 11px;
     color: var(--text-muted);
     text-align: center;
+  }
+  .combo-loading {
+    padding: 10px 12px;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: center;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .combo-loading::before {
+    content: '';
+    width: 12px; height: 12px;
+    border: 2px solid var(--border);
+    border-top-color: var(--gold-500);
+    border-radius: 50%;
+    animation: combo-spin .7s linear infinite;
+  }
+  @keyframes combo-spin { to { transform: rotate(360deg); } }
+  .combo-wrap { position: relative; }
+  .combo-clear {
+    position: absolute;
+    top: 50%; left: 8px;
+    transform: translateY(-50%);
+    width: 18px; height: 18px;
+    display: none; align-items: center; justify-content: center;
+    border: none; border-radius: 50%;
+    background: var(--surface-3); color: var(--text-muted);
+    cursor: pointer; font-size: 13px; line-height: 1; padding: 0;
+    z-index: 2;
+  }
+  .combo-clear:hover { background: var(--red); color: #fff; }
+  .combo-wrap.has-value .combo-clear { display: flex; }
+  .combo-wrap.has-value input[type="search"] { padding-left: 30px; }
+  input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; }
+  .combo-count {
+    font-size: 9px; color: var(--text-muted);
+    padding: 4px 12px; border-bottom: 1px solid var(--border-soft);
+    background: var(--surface-2, var(--surface));
+    position: sticky; top: 0;
   }
   .filter-actions {
     display: flex;
@@ -1213,7 +1255,7 @@
     <div class="sidebar-section">
       <div class="section-title">إجراءات سريعة</div>
       <div class="quick-btns" id="actionBtns">
-        <button class="quick-btn action" onclick="quickSend('قارن بين جميع المشاريع: الإيراد والتكاليف والهامش — بالدولار وبعملة كل مشروع')">مقارنة المشاريع</button>
+        <button class="quick-btn action" onclick="quickSend('قارن بين جميع المشاريع: الإيراد والتكاليف والهامش')">مقارنة المشاريع</button>
         <button class="quick-btn action" onclick="quickSend('تقرير الشركة الإجمالي: الإيرادات، التكاليف، والحجوزات')">ملخص الشركة</button>
       </div>
     </div>
@@ -1230,15 +1272,17 @@
       <div class="filter-field">
         <label for="groupSearch">الحساب الاب</label>
         <div class="combo-wrap" id="groupCombo">
-          <input type="search" id="groupSearch" placeholder="اختر مشروعاً أولاً..." autocomplete="off" disabled>
-          <div class="combo-dropdown hidden" id="groupDropdown"></div>
+          <input type="search" id="groupSearch" placeholder="اختر مشروعاً أولاً..." autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list" disabled>
+          <button type="button" class="combo-clear" id="groupClear" aria-label="مسح الحساب الاب" tabindex="-1" onclick="clearGroupSelection()">×</button>
+          <div class="combo-dropdown hidden" id="groupDropdown" role="listbox"></div>
         </div>
       </div>
       <div class="filter-field">
         <label for="accountSearch">الحساب الفرعي</label>
         <div class="combo-wrap" id="accountCombo">
-          <input type="search" id="accountSearch" placeholder="اختر الحساب الاب أولاً..." autocomplete="off" disabled>
-          <div class="combo-dropdown hidden" id="accountDropdown"></div>
+          <input type="search" id="accountSearch" placeholder="اختر الحساب الاب أولاً..." autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list" disabled>
+          <button type="button" class="combo-clear" id="accountClear" aria-label="مسح الحساب الفرعي" tabindex="-1" onclick="clearAccountSelection()">×</button>
+          <div class="combo-dropdown hidden" id="accountDropdown" role="listbox"></div>
         </div>
       </div>
       <div class="filter-actions">
@@ -1478,6 +1522,9 @@ function loadExpenseGroups() {
     allGroups = [];
     return;
   }
+  if (document.activeElement === document.getElementById('groupSearch')) {
+    showDropdownLoading('groupDropdown');
+  }
   const params = projectQueryParams();
   fetch('/api/expense-groups' + (params.toString() ? '?' + params : ''))
     .then(r => r.json())
@@ -1496,6 +1543,9 @@ function loadExpenseAccounts() {
     allAccounts = [];
     renderAccountDropdown('');
     return;
+  }
+  if (document.activeElement === document.getElementById('accountSearch')) {
+    showDropdownLoading('accountDropdown');
   }
   const params = projectQueryParams();
   params.set('groupName', selectedGroup.name);
@@ -1536,6 +1586,7 @@ function clearGroupSelection(reloadAccounts) {
   hideDropdown('groupDropdown');
   if (reloadAccounts !== false) loadExpenseAccounts();
   updateAccountControlsState();
+  updateComboValueState();
 }
 
 function clearAccountSelection(reloadList) {
@@ -1545,6 +1596,7 @@ function clearAccountSelection(reloadList) {
   hideDropdown('accountDropdown');
   if (reloadList !== false && selectedGroup) loadExpenseAccounts();
   updateAccountControlsState();
+  updateComboValueState();
 }
 
 function clearAccountFilters() {
@@ -1552,9 +1604,58 @@ function clearAccountFilters() {
   updateAccountControlsState();
 }
 
+const comboActive = { groupDropdown: -1, accountDropdown: -1 };
+const comboInputOf = { groupDropdown: 'groupSearch', accountDropdown: 'accountSearch' };
+
 function hideDropdown(id) {
   const el = document.getElementById(id);
   if (el) el.classList.add('hidden');
+  comboActive[id] = -1;
+  const inp = document.getElementById(comboInputOf[id]);
+  if (inp) inp.setAttribute('aria-expanded', 'false');
+}
+
+function comboItems(dropdownId) {
+  return Array.from(document.getElementById(dropdownId)?.querySelectorAll('.combo-item') || []);
+}
+
+function setComboActive(dropdownId, idx) {
+  const items = comboItems(dropdownId);
+  if (!items.length) { comboActive[dropdownId] = -1; return; }
+  if (idx < 0) idx = items.length - 1;
+  if (idx >= items.length) idx = 0;
+  items.forEach((el, i) => el.classList.toggle('active', i === idx));
+  comboActive[dropdownId] = idx;
+  items[idx].scrollIntoView({ block: 'nearest' });
+}
+
+function moveComboActive(dropdownId, delta) {
+  const items = comboItems(dropdownId);
+  if (!items.length) return;
+  let idx = comboActive[dropdownId];
+  idx = idx < 0 ? (delta > 0 ? 0 : items.length - 1) : idx + delta;
+  setComboActive(dropdownId, idx);
+}
+
+function activateCombo(dropdownId) {
+  const items = comboItems(dropdownId);
+  const idx = comboActive[dropdownId] >= 0 ? comboActive[dropdownId] : 0;
+  if (items[idx]) { items[idx].click(); return true; }
+  return false;
+}
+
+function updateComboValueState() {
+  const g = document.getElementById('groupCombo');
+  const a = document.getElementById('accountCombo');
+  if (g) g.classList.toggle('has-value', !!document.getElementById('groupSearch').value.trim());
+  if (a) a.classList.toggle('has-value', !!document.getElementById('accountSearch').value.trim());
+}
+
+function showDropdownLoading(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = '<div class="combo-loading">جاري التحميل…</div>';
+  el.classList.remove('hidden');
 }
 
 function renderGroupDropdown(query) {
@@ -1574,7 +1675,14 @@ function renderGroupDropdown(query) {
   if (!items.length) {
     dropdown.innerHTML = '<div class="combo-empty">' + (q ? 'لا توجد نتائج' : 'لا توجد مجموعات') + '</div>';
   } else {
-    items.slice(0, 80).forEach(g => {
+    const shown = items.slice(0, 80);
+    if (items.length > 8) {
+      const count = document.createElement('div');
+      count.className = 'combo-count';
+      count.textContent = items.length + ' مجموعة' + (items.length > 80 ? ' (يُعرض أول 80)' : '');
+      dropdown.appendChild(count);
+    }
+    shown.forEach(g => {
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'combo-item' + (selectedGroup?.name === g.name ? ' selected' : '');
@@ -1585,6 +1693,9 @@ function renderGroupDropdown(query) {
       dropdown.appendChild(item);
     });
   }
+  comboActive.groupDropdown = -1;
+  document.getElementById('groupSearch')?.setAttribute('aria-expanded', 'true');
+  updateComboValueState();
   dropdown.classList.remove('hidden');
 }
 
@@ -1609,7 +1720,14 @@ function renderAccountDropdown(query) {
   if (!items.length) {
     dropdown.innerHTML = '<div class="combo-empty">' + (q ? 'لا توجد نتائج' : 'لا توجد حسابات') + '</div>';
   } else {
-    items.slice(0, 80).forEach(a => {
+    const shown = items.slice(0, 80);
+    if (items.length > 8) {
+      const count = document.createElement('div');
+      count.className = 'combo-count';
+      count.textContent = items.length + ' حساب' + (items.length > 80 ? ' (يُعرض أول 80)' : '');
+      dropdown.appendChild(count);
+    }
+    shown.forEach(a => {
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'combo-item' + (selectedAccount?.name === a.name ? ' selected' : '');
@@ -1623,6 +1741,9 @@ function renderAccountDropdown(query) {
       dropdown.appendChild(item);
     });
   }
+  comboActive.accountDropdown = -1;
+  accountInput.setAttribute('aria-expanded', 'true');
+  updateComboValueState();
   dropdown.classList.remove('hidden');
 }
 
@@ -1633,6 +1754,8 @@ function selectGroup(group) {
   clearAccountSelection(false);
   loadExpenseAccounts();
   updateAccountControlsState();
+  updateComboValueState();
+  document.getElementById('accountSearch')?.focus();
 }
 
 function selectAccount(account) {
@@ -1640,6 +1763,7 @@ function selectAccount(account) {
   document.getElementById('accountSearch').value = account.name;
   hideDropdown('accountDropdown');
   updateAccountControlsState();
+  updateComboValueState();
 }
 
 function initAccountCombos() {
@@ -1657,8 +1781,10 @@ function initAccountCombos() {
     accountInput.value = '';
     allAccounts = [];
     updateAccountControlsState();
+    updateComboValueState();
     renderGroupDropdown(groupInput.value);
   });
+  groupInput.addEventListener('keydown', (e) => comboKeydown(e, 'groupDropdown', groupInput));
 
   accountInput.addEventListener('focus', () => {
     if (selectedGroup) renderAccountDropdown(accountInput.value);
@@ -1666,13 +1792,37 @@ function initAccountCombos() {
   accountInput.addEventListener('input', () => {
     selectedAccount = null;
     updateAccountControlsState();
+    updateComboValueState();
     renderAccountDropdown(accountInput.value);
   });
+  accountInput.addEventListener('keydown', (e) => comboKeydown(e, 'accountDropdown', accountInput));
 
   document.addEventListener('click', (e) => {
     if (!document.getElementById('groupCombo')?.contains(e.target)) hideDropdown('groupDropdown');
     if (!document.getElementById('accountCombo')?.contains(e.target)) hideDropdown('accountDropdown');
   });
+}
+
+function comboKeydown(e, dropdownId, input) {
+  const dropdown = document.getElementById(dropdownId);
+  const open = dropdown && !dropdown.classList.contains('hidden');
+  switch (e.key) {
+    case 'ArrowDown':
+      e.preventDefault();
+      if (!open) { input.dispatchEvent(new Event('focus')); return; }
+      moveComboActive(dropdownId, 1);
+      break;
+    case 'ArrowUp':
+      e.preventDefault();
+      moveComboActive(dropdownId, -1);
+      break;
+    case 'Enter':
+      if (open && activateCombo(dropdownId)) e.preventDefault();
+      break;
+    case 'Escape':
+      if (open) { e.preventDefault(); e.stopPropagation(); hideDropdown(dropdownId); }
+      break;
+  }
 }
 
 function sendAccountQuery() {

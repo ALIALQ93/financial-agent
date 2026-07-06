@@ -135,19 +135,34 @@ function interpretRecord(rec) {
   }
 }
 
+/** توحيد أسماء أنواع السجلات القادمة من الجدول إلى الصيغة المعتمدة داخلياً */
+function canonicalRecordType(t) {
+  const s = String(t || '').trim();
+  const map = {
+    'الخدمات': 'خدمات',
+    'الايراد': 'ايراد',
+    'الإيراد': 'ايراد',
+    'الحجز': 'حجز',
+    'المزاد': 'مزاد',
+  };
+  return map[s] || s;
+}
+
 function normalizeRecord(raw) {
   return {
     num: raw['#'],
     accountCode: (raw['الرمز'] || '').trim(),
     accountName: raw['الحساب'] || '',
     group: raw['الحساب الاب'] || '',
+    // اختصار المشروع = كود مختصر | مركز الكلفة = الاسم الكامل للمشروع
     projectCode: raw['اختصار المشروع'] || '',
-    projectName: raw['المشروع'] || '',
-    debit: parseAmount(raw['المدفوع']),
-    credit: parseAmount(raw['المستحق']),
+    projectName: raw['مركز الكلفة'] || raw['المشروع'] || raw['اختصار المشروع'] || '',
     net: parseAmount(raw['القيمة $']),
-    recordType: raw['النوع'] || '',
-    exchangeRate: parseAmount(raw['تعادل العملة']) || 0,
+    recordType: canonicalRecordType(raw['النوع']),
+    // سعر الصرف (الاسم الجديد) مع دعم "تعادل العملة" القديم للتوافق
+    exchangeRate: parseAmount(raw['سعر الصرف'] || raw['تعادل العملة']) || 0,
+    // القيمة IQD محسوبة مسبقاً في الجدول (اختيارية — تُستخدم كتحقق)
+    iqdValue: parseAmount(raw['القيمة IQD']),
   };
 }
 
@@ -157,8 +172,8 @@ function classifyRecord(rec) {
   if (recordType === 'ايراد') return 'revenue';
   if (recordType === 'مزاد') return 'auction';
   // نوع السجل أولاً — لا يُلغى بكود الحساب
-  if (recordType === 'خدمات' || recordType === 'المصاريف') return 'expense';
-  if (recordType === 'المقاوليين' || recordType === 'المجهزيين' || recordType === 'الموردين') {
+  if (recordType === 'خدمات' || recordType === 'الخدمات' || recordType === 'المصاريف') return 'expense';
+  if (recordType === 'المقاوليين' || recordType === 'المجهزيين' || recordType === 'الموردين' || recordType === 'الالتزامات') {
     return 'contractor';
   }
   if (accountCode.startsWith('11')) return 'reservation';
@@ -297,6 +312,7 @@ function detectRecordType(query) {
   if (/المقاولين|مقاولين|مقاول/.test(q)) return 'المقاوليين';
   if (/المجهزين|مجهزين|مجهز/.test(q)) return 'المجهزيين';
   if (/الموردين|موردين|مورد/.test(q)) return 'الموردين';
+  if (/الالتزامات|التزامات|التزام|المستحقات|مستحقات/.test(q)) return 'الالتزامات';
   if (/الخدمات|خدمات/.test(q)) return 'خدمات';
   if (/المصاريف|مصاريف/.test(q)) return 'المصاريف';
   if (/التكاليف|تكاليف|مصروفات|المصروفات/.test(q)) return 'تكاليف';
@@ -314,19 +330,23 @@ const RECORD_TYPE_LABEL = {
   المقاوليين: 'المقاوليين',
   المجهزيين: 'المجهزيين',
   الموردين: 'المقاوليين/المجهزيين/الموردين',
+  الالتزامات: 'الالتزامات (مقاولون/مجهزون/موردون)',
   مزاد: 'مزاد',
   تكاليف: 'المصاريف + خدمات',
 };
+
+const OBLIGATION_TYPES = ['المقاوليين', 'المجهزيين', 'الموردين', 'الالتزامات'];
 
 function filterByRecordType(records, typeKey) {
   if (!typeKey) return records;
   if (typeKey === 'تكاليف') {
     return records.filter(r => r.recordType === 'المصاريف' || r.recordType === 'خدمات');
   }
+  if (typeKey === 'الالتزامات') {
+    return records.filter(r => classifyRecord(r) === 'contractor');
+  }
   if (typeKey === 'الموردين') {
-    return records.filter(r =>
-      r.recordType === 'الموردين' || r.recordType === 'المقاوليين' || r.recordType === 'المجهزيين'
-    );
+    return records.filter(r => OBLIGATION_TYPES.includes(r.recordType));
   }
   return records.filter(r => r.recordType === typeKey);
 }
@@ -341,6 +361,7 @@ function recordTypeMeaning(typeKey, net) {
     case 'المقاوليين':
     case 'المجهزيين':
     case 'الموردين':
+    case 'الالتزامات':
       if (net > 0) return 'مصروف لم يُدفع بعد';
       if (net < 0) return 'أعمال/توريد ستُقدَّم لاحقاً';
       return 'متوازن';
@@ -718,6 +739,14 @@ function detectIntent(query, records) {
     return 'company';
   }
   if (/قارن|مقارنة|هامش|ترتيب|مقارنة بين/.test(q) && !detectRecordType(query)) return 'comparison';
+  // أنواع سجلات صريحة (التزامات/مقاولون/مجهزون/موردون/ايراد/حجز/مزاد/خدمات)
+  // تتقدّم على تخمين "مجموعة المصروف"؛ أما "مصاريف/تكاليف" العامة فتترك الأولوية للمجموعة المحددة
+  const rtype = detectRecordType(query);
+  const strongType = rtype && !['المصاريف', 'تكاليف'].includes(rtype);
+  if (strongType) {
+    const typeQStrong = detectRecordTypeQuery(query, records);
+    if (typeQStrong?.type) return 'record_type';
+  }
   const expenseGroupQ = records?.length ? detectExpenseGroupQuery(query, records) : null;
   if (expenseGroupQ?.group) return 'expense_group';
   const typeQ = detectRecordTypeQuery(query, records);
@@ -1770,7 +1799,7 @@ function buildRecordTypeReport(records, typeQuery, query) {
     out += '\n';
   }
 
-  if (['المقاوليين', 'المجهزيين', 'الموردين'].includes(type)) {
+  if (OBLIGATION_TYPES.includes(type)) {
     const byAccount = new Map();
     for (const r of summary.filtered) {
       const key = r.accountName;
@@ -2027,7 +2056,7 @@ function buildVisuals(records, userMessage, currency) {
         ],
       });
 
-      if (['المقاوليين', 'المجهزيين', 'الموردين'].includes(typeQuery.type)) {
+      if (OBLIGATION_TYPES.includes(typeQuery.type)) {
         const byAccount = new Map();
         for (const r of summary.filtered) {
           const cur = byAccount.get(r.accountName) || { usd: 0, iqd: 0 };
@@ -2211,7 +2240,7 @@ function buildContext(records, userMessage, currency) {
 
   let out = `تاريخ البيانات: من Google Sheets\n`;
   out += `عدد السجلات: ${records.length} | عدد المشاريع: ${getAllProjects(records).length}\n`;
-  out += `عملة العرض: **${currencyLabel()}** (الأساس دولار؛ التحويل للدينار بسعر عمود "تعادل العملة")\n`;
+  out += `عملة العرض: **${currencyLabel()}** (الأساس دولار؛ التحويل للدينار بسعر عمود "سعر الصرف")\n`;
   if (role) out += `دور المستخدم المحدد: **${role}**\n`;
   const expenseGroupQ = detectExpenseGroupQuery(query, records);
   if (expenseGroupQ?.group) out += `مجموعة المصروف: **${expenseGroupQ.group.name}**\n`;
