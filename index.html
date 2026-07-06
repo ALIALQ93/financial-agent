@@ -1148,7 +1148,25 @@
           مرحباً! أنا <strong>المحلل المالي</strong>.
           أقرأ بيانات الشركة من Google Sheets وأعرض <strong>جداول ومخططات</strong> مع تفسير حسب نوع السجل.
           <br><br>
-          اختر مشروعاً من القائمة الجانبية أو اسأل سؤالك مباشرة.
+          اختر مشروعاً من القائمة الجانبية أو ابدأ بأحد الاقتراحات التالية:
+          <div class="suggest-chips">
+            <button class="suggest-chip" onclick="quickSend('تقرير الشركة الإجمالي: الإيرادات، التكاليف، والحجوزات')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18M7 16l4-4 4 4 5-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              ملخص الشركة
+            </button>
+            <button class="suggest-chip" onclick="quickSend('قارن بين جميع المشاريع: الإيراد والتكاليف والهامش')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              مقارنة المشاريع
+            </button>
+            <button class="suggest-chip" onclick="quickSend('التزامات المقاولين والمجهزين والموردين حسب المشروع')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0 .01M23 21v-2a4 4 0 0 0-3-3.87" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              التزامات المقاولين
+            </button>
+            <button class="suggest-chip" onclick="quickSend('المشاريع بلا إيراد مسجل')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 12h6" stroke-linecap="round"/></svg>
+              مشاريع بلا إيراد
+            </button>
+          </div>
           <div class="msg-time" id="initTime"></div>
         </div>
       </div>
