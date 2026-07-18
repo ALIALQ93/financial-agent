@@ -314,8 +314,8 @@ function detectRecordType(query) {
   if (/الموردين|موردين|مورد/.test(q)) return 'الموردين';
   if (/الالتزامات|التزامات|التزام|المستحقات|مستحقات/.test(q)) return 'الالتزامات';
   if (/الخدمات|خدمات/.test(q)) return 'خدمات';
-  if (/المصاريف|مصاريف/.test(q)) return 'المصاريف';
-  if (/التكاليف|تكاليف|مصروفات|المصروفات/.test(q)) return 'تكاليف';
+  // «مصاريف» و«تكاليف» كلاهما = كل التكاليف (المصاريف + الخدمات) لتطابق تقرير المشروع/الشركة
+  if (/المصاريف|مصاريف|التكاليف|تكاليف|مصروفات|المصروفات/.test(q)) return 'تكاليف';
   if (/الحجوزات|حجز/.test(q)) return 'حجز';
   if (/مزاد|فرق عمل/.test(q)) return 'مزاد';
   if (/الايراد|الإيراد|ايراد|إيراد|ايرادات|إيرادات/.test(q)) return 'ايراد';
@@ -1115,12 +1115,11 @@ function describeProjectMatch(project, query) {
 
 function filterByProject(records, project) {
   if (!project) return records;
-  return records.filter(r =>
-    r.projectName === project.name ||
-    r.projectCode === project.code ||
-    (project.code && r.projectCode.includes(project.code)) ||
-    (project.name && r.projectName.includes(project.name))
-  );
+  // مطابقة دقيقة بنفس مفتاح getAllProjects/groupRecordsByProject (اسم المشروع أو كوده)
+  // تجنّباً للمطابقة الجزئية التي تُدرج سجلات مشروع داخل مشروع آخر يحمل اسماً متضمَّناً
+  // (مثال: سجلات "Karbala PIP" كانت تُطابق أيضاً مشروع "Karbala").
+  const key = project.name || project.code;
+  return records.filter(r => (r.projectName || r.projectCode) === key);
 }
 
 function analyzeProjectRecords(records) {
