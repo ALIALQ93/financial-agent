@@ -518,7 +518,9 @@ function findMatchingExpenseAccounts(records, query, groupName, project = null) 
       const accN = normalizeForSearch(a.name);
       const codeHit = a.code && codeNums.includes(normalizeForSearch(a.code));
       if (codeHit) return true;
-      if (accN.split(/\s+/).length === 1 && groupN.includes(accN)) return false;
+      // اسم حساب متضمَّن في اسم المجموعة (مثل "مصاريف الرواتب" داخل
+      // "مصاريف الرواتب والاجور"): ذكره في السؤال يعني المجموعة لا الحساب الفرعي
+      if (groupN.includes(accN)) return false;
       return a.score >= 18 && accN.length >= 3 && qNorm.includes(accN);
     })
     .sort((a, b) => b.score - a.score);
@@ -1139,23 +1141,25 @@ function analyzeProjectRecords(records) {
 
   for (const r of records) {
     const cls = classifyRecord(r);
-    const local = localVal(r);
+    // قيمة دينار موقّعة بنفس إشارة الدولار — استخدام القيمة المطلقة كان يضخّم
+    // مجاميع الدينار عند وجود سجلات سالبة (مرتجعات/خصومات)
+    const localSigned = r.net * recordRate(r);
 
     switch (cls) {
       case 'revenue':
         revenue += Math.abs(r.net);
-        revenueLocal += local;
+        revenueLocal += Math.abs(localSigned);
         break;
       case 'reservation':
         reservation += r.net;
-        reservationLocal += local;
+        reservationLocal += localSigned;
         break;
       case 'expense':
         expenses += r.net;
-        expensesLocal += local;
+        expensesLocal += localSigned;
         if (r.recordType === 'خدمات') expenseServices += r.net;
         expenseGroups.set(r.group, (expenseGroups.get(r.group) || 0) + r.net);
-        expenseGroupsLocal.set(r.group, (expenseGroupsLocal.get(r.group) || 0) + local);
+        expenseGroupsLocal.set(r.group, (expenseGroupsLocal.get(r.group) || 0) + localSigned);
         break;
       case 'auction':
         auctionNet += r.net;
@@ -1537,11 +1541,20 @@ function detectAccountQuery(query, records) {
   let projectCandidates = [];
 
   if (records && !scopeAll) {
-    const res = resolveProjectQuery(records, query);
-    if (res.status === 'unique') project = res.project;
-    else if (res.status === 'ambiguous') {
-      projectAmbiguous = true;
-      projectCandidates = res.candidates;
+    // إزالة رمز الحساب واسمه من السؤال قبل حلّ المشروع، حتى لا تتسرب
+    // أرقام الرمز (مثل 320211) إلى مطابقة أكواد المشاريع (مثل 11kV 020)
+    let projectQuery = query;
+    for (const code of top.codes || []) {
+      projectQuery = projectQuery.split(code).join(' ');
+    }
+    projectQuery = projectQuery.split(top.name).join(' ');
+    if (normalizeForSearch(projectQuery).replace(/\s/g, '')) {
+      const res = resolveProjectQuery(records, projectQuery);
+      if (res.status === 'unique') project = res.project;
+      else if (res.status === 'ambiguous') {
+        projectAmbiguous = true;
+        projectCandidates = res.candidates;
+      }
     }
   }
 
