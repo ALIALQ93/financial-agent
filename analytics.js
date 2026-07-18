@@ -774,6 +774,24 @@ function getAllProjects(records) {
   return [...map.values()];
 }
 
+/**
+ * يوزّع كل سجل على مشروع واحد فقط حسب هويته الفعلية (اسم/كود المشروع).
+ * ضروري للتقارير الإجمالية (الشركة/المقارنة) لتفادي ازدواج العدّ الناتج عن
+ * المطابقة الجزئية في filterByProject (مثال: سجل "Karbala PIP" يطابق أيضاً مشروع "Karbala").
+ */
+function groupRecordsByProject(records) {
+  const map = new Map();
+  for (const r of records) {
+    const key = r.projectName || r.projectCode;
+    if (!key) continue;
+    if (!map.has(key)) {
+      map.set(key, { project: { name: r.projectName, code: r.projectCode }, records: [] });
+    }
+    map.get(key).records.push(r);
+  }
+  return [...map.values()];
+}
+
 function scoreProjectMatch(project, query, indexEntry) {
   const tokens = extractQueryTokens(query);
   const qNorm = normalizeForSearch(cleanQuery(query));
@@ -1265,11 +1283,10 @@ function buildProjectReport(records, project) {
 }
 
 function buildCompanyReport(records) {
-  const projects = getAllProjects(records);
-  const rows = projects.map(p => {
-    const a = analyzeProjectRecords(filterByProject(records, p));
-    return { ...p, ...a };
-  });
+  const rows = groupRecordsByProject(records).map(g => ({
+    ...g.project,
+    ...analyzeProjectRecords(g.records),
+  }));
 
   const totalRevenue = rows.reduce((s, r) => s + r.revenue, 0);
   const totalCosts = rows.reduce((s, r) => s + r.totalCosts, 0);
@@ -1298,22 +1315,22 @@ function buildCompanyReport(records) {
 }
 
 function buildComparisonReport(records) {
-  const projects = getAllProjects(records);
-  const rows = projects.map(p => {
-    const a = analyzeProjectRecords(filterByProject(records, p));
-    return {
-      name: p.name,
-      code: p.code,
-      revenue: a.revenue,
-      revenueLocal: a.revenueLocal,
-      costs: a.totalCosts,
-      costsLocal: a.totalCostsLocal,
-      profit: a.profit,
-      profitLocal: a.profitLocal,
-      margin: a.margin,
-      hasRevenue: a.hasRevenue,
-    };
-  }).filter(r => r.hasRevenue)
+  const groups = groupRecordsByProject(records).map(g => ({
+    project: g.project,
+    a: analyzeProjectRecords(g.records),
+  }));
+  const rows = groups.map(({ project: p, a }) => ({
+    name: p.name,
+    code: p.code,
+    revenue: a.revenue,
+    revenueLocal: a.revenueLocal,
+    costs: a.totalCosts,
+    costsLocal: a.totalCostsLocal,
+    profit: a.profit,
+    profitLocal: a.profitLocal,
+    margin: a.margin,
+    hasRevenue: a.hasRevenue,
+  })).filter(r => r.hasRevenue)
     .sort((a, b) => (b.margin ?? -999) - (a.margin ?? -999));
 
   const curL = currencyLabel();
@@ -1325,7 +1342,7 @@ function buildComparisonReport(records) {
     out += `| ${i + 1} | ${r.name} (${r.code}) | ${money(r.revenue, r.revenueLocal)} | ${money(r.costs, r.costsLocal)} | ${money(r.profit, r.profitLocal)} | ${r.margin !== null ? r.margin.toFixed(1) + '%' : '—'} |\n`;
   });
 
-  const noRev = projects.filter(p => !analyzeProjectRecords(filterByProject(records, p)).hasRevenue);
+  const noRev = groups.filter(({ a }) => !a.hasRevenue).map(({ project }) => project);
   if (noRev.length) {
     out += `\nمشاريع بلا إيراد (لا تدخل المقارنة): ${noRev.map(p => p.name).join('، ')}\n`;
   }
@@ -2242,12 +2259,13 @@ function buildContext(records, userMessage, currency) {
   out += `عدد السجلات: ${records.length} | عدد المشاريع: ${getAllProjects(records).length}\n`;
   out += `عملة العرض: **${currencyLabel()}** (الأساس دولار؛ التحويل للدينار بسعر عمود "سعر الصرف")\n`;
   if (role) out += `دور المستخدم المحدد: **${role}**\n`;
-  const expenseGroupQ = detectExpenseGroupQuery(query, records);
-  if (expenseGroupQ?.group) out += `مجموعة المصروف: **${expenseGroupQ.group.name}**\n`;
-  else if (intent === 'account') {
+  if (intent === 'expense_group') {
+    const expenseGroupQ = detectExpenseGroupQuery(query, records);
+    if (expenseGroupQ?.group) out += `مجموعة المصروف: **${expenseGroupQ.group.name}**\n`;
+  } else if (intent === 'account') {
     const accQ = detectAccountQuery(query, records);
     if (accQ?.account) out += `الحساب المطلوب: **${accQ.account.name}**${accQ.account.codes.length ? ` (رمز: ${accQ.account.codes.join('، ')})` : ''}\n`;
-  } else {
+  } else if (intent === 'record_type') {
     const typeQ = detectRecordTypeQuery(query, records);
     if (typeQ) out += `نوع السجل المطلوب: **${typeQ.label}**\n`;
   }
